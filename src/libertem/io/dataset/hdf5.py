@@ -3,8 +3,14 @@ import warnings
 import logging
 import time
 
+logger = logging.getLogger(__name__)
+
 import numpy as np
 import h5py
+try:
+    import hdf5plugin
+except ModuleNotFoundError:
+    logger.debug("Unable to import package hdf5plugin, some HDF5 (de)compression schemes will be unavailable")
 
 from libertem.common import Slice, Shape
 from libertem.common.buffers import zeros_aligned
@@ -19,7 +25,6 @@ from .base import (
 # alias for mocking:
 current_time = time.time
 
-logger = logging.getLogger(__name__)
 
 
 class HDF5DatasetParams(MessageConverter):
