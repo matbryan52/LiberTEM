@@ -10,6 +10,7 @@ import numpy as np
 from numpy.testing import assert_allclose
 import pytest
 import h5py
+import hdf5plugin
 
 from libertem.io.dataset.hdf5 import H5DataSet
 from libertem.analysis.sum import SumAnalysis
@@ -636,3 +637,17 @@ def test_hdf5_macrotile_empty_roi(lt_ctx, hdf5_ds_1):
         m0,
         0,
     )
+
+
+def test_hdf5_hdf5plugin(lt_ctx, tmpdir_factory):
+    datadir = tmpdir_factory.mktemp('data')
+    filename = os.path.join(datadir, 'compressed_plugin.h5')
+    data = _mk_random((128, 128, 4, 4), dtype=np.float32)
+
+    with h5py.File(filename, "w") as f:
+        f.create_dataset("data", data=data,
+                          **hdf5plugin.Blosc(cname='blosclz'))
+
+    ds = lt_ctx.load("hdf5", path=filename)
+    partitions = ds.get_partitions()
+    part = next(partitions)

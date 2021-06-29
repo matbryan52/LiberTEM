@@ -8,3 +8,4 @@ aiohttp
 websockets
 pytest-benchmark
 ipykernel
+hdf5plugin
