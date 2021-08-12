@@ -427,9 +427,9 @@ class RayExecutor(CommonRayMixin, JobExecutor):
 
 
     @classmethod
-    def make_local(cls, spec=None, cluster_kwargs=None, client_kwargs=None):
+    def make_local(cls, default_cluster=False, spec=None, cluster_kwargs=None, client_kwargs=None):
         """
-        Spin up a local dask cluster
+        Spin up a local Ray cluster
 
         interesting cluster_kwargs:
             threads_per_worker
@@ -437,24 +437,27 @@ class RayExecutor(CommonRayMixin, JobExecutor):
 
         Returns
         -------
-        DaskJobExecutor
+        RayJobExecutor
             the connected JobExecutor
         """
-        if spec is None:
-            from libertem.utils.devices import detect
-            spec = cluster_spec(**detect())
+        if not default_cluster:
+            if spec is None:
+                from libertem.utils.devices import detect
+                spec = cluster_spec(**detect())
 
-        if cluster_kwargs is None:
-            cluster_kwargs = {}
-        if cluster_kwargs.get('silence_logs') is None:
-            cluster_kwargs['silence_logs'] = logging.WARN
+            if cluster_kwargs is None:
+                cluster_kwargs = {}
+            if cluster_kwargs.get('silence_logs') is None:
+                cluster_kwargs['silence_logs'] = logging.WARN
 
-        ray_args = {
-            'configure_logging': True,
-            'logging_level': cluster_kwargs['silence_logs'],
-            'num_cpus': sum([s['options']['resources'].get('CPU', 0) for s in spec.values()]),
-            'num_gpus': sum([s['options']['resources'].get('CUDA', 0) for s in spec.values()]),
-        }
+            ray_args = {
+                'configure_logging': True,
+                'logging_level': cluster_kwargs['silence_logs'],
+                'num_cpus': sum([s['options']['resources'].get('CPU', 0) for s in spec.values()]),
+                'num_gpus': sum([s['options']['resources'].get('CUDA', 0) for s in spec.values()]),
+            }
+        else:
+            ray_args = {}
 
         if not ray.is_initialized():
             ray.init(**ray_args)
