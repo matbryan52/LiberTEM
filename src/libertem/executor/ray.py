@@ -336,10 +336,12 @@ class RayExecutor(CommonRayMixin, JobExecutor):
         def _id_to_task(task_id):
             return tasks[task_id]
 
-        for idx, orig_task in enumerate(tasks):
-            tasks_wrapped.append(RayTaskProxy(orig_task, idx))
+        for idx, task_dict in enumerate(tasks):
+            env = Environment(threads_per_worker=1)
+            task_dict['kwargs']['env'] = env
+            task_dict['kwargs']['task_idx'] = idx
 
-        futures = self._get_futures(tasks_wrapped)
+        futures = self._get_futures(tasks)
         self._futures[cancel_id] = futures
 
         try:
@@ -352,7 +354,8 @@ class RayExecutor(CommonRayMixin, JobExecutor):
                         del self._futures[cancel_id]
                         raise JobCancelledError()
                     result = result_wrap['task_result']
-                    task = _id_to_task(result_wrap['task_id'])
+                    task_dict = _id_to_task(result_wrap['task_id'])
+                    task = TaskRecord(task_dict['args'][-1])
                     yield result, task
         finally:
             if cancel_id in self._futures:
