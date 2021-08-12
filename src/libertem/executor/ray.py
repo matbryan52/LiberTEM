@@ -304,6 +304,11 @@ def ray_task_creator(udf_init, task_metadata, partition_idx, partition,
             "task_id": task_idx,
             }
 
+class TaskRecord(object):
+    def __init__(self, partition):
+        self.partition = partition
+
+
 class RayExecutor(CommonRayMixin, JobExecutor):
     def __init__(self, client, is_local=False, lt_resources=None):
         self.is_local = is_local
