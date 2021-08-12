@@ -493,7 +493,8 @@ class RayExecutor(CommonRayMixin, JobExecutor):
             the connected JobExecutor
         """
         ray.init(*args, **kwargs)
-        return True
+        client = {'args':args, 'kwargs':kwargs}
+        return cls(client, is_local=False, lt_resources=None)
 
 
     @classmethod
