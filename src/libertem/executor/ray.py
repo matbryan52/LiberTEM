@@ -313,6 +313,16 @@ class RayExecutor(CommonRayMixin, JobExecutor):
         self.lt_resources = lt_resources
         self._futures = {}
 
+    def put(self, obj):
+        obj_reference = ray.put(obj)
+        return obj_reference
+
+    def get(self, obj_reference):
+        """
+        obj_reference can be a list
+        """
+        objs = ray.get(obj_reference)
+        return objs
 
     def run_tasks(self, tasks, cancel_id):
         tasks = list(tasks)
