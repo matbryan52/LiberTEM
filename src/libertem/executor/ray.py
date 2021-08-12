@@ -331,7 +331,6 @@ class RayExecutor(CommonRayMixin, JobExecutor):
 
     def run_tasks(self, tasks, cancel_id):
         tasks = list(tasks)
-        tasks_wrapped = []
 
         def _id_to_task(task_id):
             return tasks[task_id]
@@ -486,11 +485,11 @@ class RayExecutor(CommonRayMixin, JobExecutor):
     @classmethod
     def connect(cls, *args, **kwargs):
         """
-        Connect to a remote dask scheduler
+        Connect to a remote Ray scheduler
 
         Returns
         -------
-        DaskJobExecutor
+        RayJobExecutor
             the connected JobExecutor
         """
         ray.init(*args, **kwargs)
