@@ -1435,7 +1435,7 @@ class UDFRunner:
         if dry:
             tasks = []
         else:
-            tasks = list(self._make_udf_tasks(dataset, roi, corrections, backends))
+            tasks = list(self._make_udf_tasks(dataset, roi, corrections, backends, executor))
         return tasks
 
     def run_for_dataset(self, dataset: DataSet, executor,
@@ -1524,7 +1524,7 @@ class UDFRunner:
     def _roi_for_partition(self, roi, partition: Partition):
         return roi.reshape(-1)[partition.slice.get(nav_only=True)]
 
-    def _make_udf_tasks(self, dataset: DataSet, roi, corrections, backends):
+    def _make_udf_tasks(self, dataset: DataSet, roi, corrections, backends, executor):
         for idx, partition in enumerate(dataset.get_partitions()):
             if roi is not None:
                 roi_for_part = self._roi_for_partition(roi, partition)
