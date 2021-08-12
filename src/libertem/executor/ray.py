@@ -236,6 +236,26 @@ class CommonRayMixin:
 
         return details_sorted
 
+    def _store_task_info(self, _udfs, corrections, roi, backends):
+        udf_init_info = []
+        for udf in _udfs:
+            udf_init_info.append({'class': udf.__class__, 'kwargs':udf._kwargs})
+        udf_init_hash = self.put(udf_init_info)
+
+        task_metadata = {'corrections': corrections,
+                        'roi': roi,
+                        'backends': backends}
+        task_metadata_hash = self.put(task_metadata)
+        return {'udf_init_hash': udf_init_hash,
+                'task_metadata_hash': task_metadata_hash}
+
+    def _convert_task_format(self, hashes, idx, partition):
+        udf_init_hash = hashes['udf_init_hash']
+        task_metadata_hash = hashes['task_metadata_hash']
+        return {'callable': ray_task_creator,
+                'args': [udf_init_hash, task_metadata_hash, idx, partition],
+                'kwargs': {}}
+
 
 def ray_as_completed(futures, num_returns=1, fetch_local=True, **kwargs):
     unfinished = futures
@@ -250,6 +270,39 @@ def ray_as_completed(futures, num_returns=1, fetch_local=True, **kwargs):
 def run_remote_wrapper(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
+
+@ray.remote
+def ray_task_creator(udf_init, task_metadata, partition_idx, partition,
+                                    *args, env=None, task_idx=None, **kwargs):
+    """
+    Executed for each partition as a remote function
+    UDFs are init'd, buffers allocated for the partition
+    UDFTask created and then called
+
+    I am hacking in the functionality of TaskProxy here
+    because once a function has been decorated as remote
+    I don't see quite how to wrap its return values
+    """
+    # import internal to function to avoid circular dependency
+    # this would be refactored out in a real implementation of RayExecutor
+    from libertem.udf.base import UDFTask
+
+    udfs = [ud['class'](**ud['kwargs']) for ud in udf_init]
+    roi = task_metadata['roi']
+    corrections = task_metadata['corrections']
+    backends = task_metadata['backends']
+
+    for udf in udfs:
+        udf.params.new_for_partition(partition, roi)
+
+    task_result = UDFTask(
+        partition=partition, idx=partition_idx, udfs=udfs, roi=roi, corrections=corrections,
+        backends=backends)(*args, env=env, **kwargs)
+    
+    return {
+            "task_result": task_result,
+            "task_id": task_idx,
+            }
 
 class RayExecutor(CommonRayMixin, JobExecutor):
     def __init__(self, client, is_local=False, lt_resources=None):
