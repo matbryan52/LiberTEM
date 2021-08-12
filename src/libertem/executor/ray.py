@@ -167,13 +167,34 @@ class CommonRayMixin:
 
         return len(workers.filter(has_resources)) > 0
 
-    def _get_futures(self, tasks):
+    def _get_futures(self, tasks, *args, **kwargs):
+        '''
+        Expect tasks to be a list of dictionaries
+        [{'callable':fn, 'args':[], 'kwargs'}]
+        or a list of callable in which case *args/**kwargs
+        are passed. Callables are assumed to be remote fns
+        '''
         available_workers = self.get_available_workers()
         if len(available_workers) == 0:
             raise RuntimeError("no workers available!")
-        if not all([callable(task) for task in tasks]):
-            raise RuntimeError("Found task which is not callable")
-        return [run_remote.remote(task.__call__) for task in tasks]
+        futures = []
+        for task in tasks:
+            if isinstance(task, dict):
+                future = self.call_remote(task['callable'],
+                                          *task.get('args', []),
+                                          **task.get('kwargs', {}))
+            elif callable(task):
+                future = self.call_remote(task, *args, **kwargs)
+            else:
+                raise RuntimeError('Unrecognized task format (dict or callable)')
+            futures.append(future)
+        return futures
+
+    def call_remote(self, fn, *args, **kwargs):
+        try:
+            return fn.remote(*args, **kwargs)
+        except AttributeError:
+            return run_remote_wrapper.remote(fn, *args, **kwargs)
 
     def get_available_workers(self):
         return WorkerSet([
@@ -226,7 +247,7 @@ def ray_as_completed(futures, num_returns=1, fetch_local=True, **kwargs):
         yield finished
 
 @ray.remote
-def run_remote(fn, *args, **kwargs):
+def run_remote_wrapper(fn, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
@@ -323,7 +344,7 @@ class RayExecutor(CommonRayMixin, JobExecutor):
         """
         run a callable `fn` on any worker
         """
-        future = run_remote.remote(fn, *args, **kwargs)
+        future = run_remote_wrapper.remote(fn, *args, **kwargs)
         return ray.get(future)        
 
     def map(self, fn, iterable):
