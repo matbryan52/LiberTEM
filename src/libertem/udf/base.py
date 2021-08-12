@@ -20,6 +20,7 @@ from libertem.corrections import CorrectionSet
 from libertem.common.backend import get_use_cuda, get_device_class
 from libertem.utils.async_utils import async_generator_eager
 from libertem.executor.inline import InlineJobExecutor
+from libertem.executor.ray import RayExecutor
 
 
 log = logging.getLogger(__name__)
@@ -1525,20 +1526,28 @@ class UDFRunner:
         return roi.reshape(-1)[partition.slice.get(nav_only=True)]
 
     def _make_udf_tasks(self, dataset: DataSet, roi, corrections, backends, executor):
+        ray_exec = isinstance(executor, RayExecutor)
+        if ray_exec:
+            hashes = executor._store_task_info(self._udfs, corrections, roi, backends)
+
         for idx, partition in enumerate(dataset.get_partitions()):
             if roi is not None:
                 roi_for_part = self._roi_for_partition(roi, partition)
                 if np.count_nonzero(roi_for_part) == 0:
                     # roi is empty for this partition, ignore
                     continue
-            udfs = [
-                udf.copy_for_partition(partition, roi)
-                for udf in self._udfs
-            ]
-            yield UDFTask(
-                partition=partition, idx=idx, udfs=udfs, roi=roi, corrections=corrections,
-                backends=backends,
-            )
+
+            if ray_exec:
+                yield executor._convert_task_format(hashes, idx, partition)
+            else:
+                udfs = [
+                    udf.copy_for_partition(partition, roi)
+                    for udf in self._udfs
+                ]
+                yield UDFTask(
+                    partition=partition, idx=idx, udfs=udfs, roi=roi, corrections=corrections,
+                    backends=backends,
+                )
 
 
 class UDFResults:
