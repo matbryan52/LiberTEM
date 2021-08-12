@@ -85,21 +85,21 @@ def cluster_spec(cpus, cudas, has_cupy, name='default', num_service=0, options=N
     return workers_spec
 
 
-class RayTaskProxy(TaskProxy):
-    def __init__(self, task, task_id):
-        super().__init__(task)
-        self.task_id = task_id
+# class RayTaskProxy(TaskProxy):
+#     def __init__(self, task, task_id):
+#         self.task = task
+#         self.task_id = task_id
 
-    def __call__(self, *args, **kwargs):
-        env = Environment(threads_per_worker=1)
-        task_result = self.task(env=env)
-        return {
-            "task_result": task_result,
-            "task_id": self.task_id,
-        }
+#     def __call__(self, *args, **kwargs):
+#         env = Environment(threads_per_worker=1)
+#         task_result = self.task.remote(*args, **kwargs, env=env)
+#         return {
+#             "task_result": task_result,
+#             "task_id": self.task_id,
+#         }
 
-    def __repr__(self):
-        return f"<TaskProxy: {self.task!r} (id={self.task_id})>"
+#     def __repr__(self):
+#         return f"<TaskProxy: {self.task!r} (id={self.task_id})>"
 
 
 class CommonRayMixin:
