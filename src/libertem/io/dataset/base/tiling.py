@@ -410,6 +410,11 @@ class DataTile(np.ndarray):
     def __repr__(self):
         return "<DataTile %r scheme_idx=%d>" % (self.tile_slice, self.scheme_idx)
 
+    def __reduce__(self):
+        deserializer = DataTile
+        serialized_data = (np.asarray(self), self.tile_slice, self.scheme_idx)
+        return deserializer, serialized_data
+
 
 class Negotiator:
     """
