@@ -1522,7 +1522,8 @@ class UDFRunner:
         async for res in async_generator_eager(gen, pool=self._pool):
             yield res
 
-    def _roi_for_partition(self, roi, partition: Partition):
+    @staticmethod
+    def _roi_for_partition(roi, partition: Partition):
         return roi.reshape(-1)[partition.slice.get(nav_only=True)]
 
     def _make_udf_tasks(self, dataset: DataSet, roi, corrections, backends, executor):
