@@ -11,7 +11,7 @@ from .base import (
 )
 from .scheduler import Worker, WorkerSet
 from libertem.common.backend import set_use_cpu, set_use_cuda
-
+from libertem.udf.base import UDFTask
 
 log = logging.getLogger(__name__)
 
@@ -236,25 +236,25 @@ class CommonRayMixin:
 
         return details_sorted
 
-    def _store_task_info(self, _udfs, corrections, roi, backends):
+    def _store_global_task_info(self, _udfs, corrections, roi, backends):
         udf_init_info = []
         for udf in _udfs:
-            udf_init_info.append({'class': udf.__class__, 'kwargs':udf._kwargs})
+            udf_init_info.append({'class': udf.__class__, 'kwargs': udf._kwargs})
         udf_init_hash = self.put(udf_init_info)
 
-        task_metadata = {'corrections': corrections,
-                        'roi': roi,
-                        'backends': backends}
-        task_metadata_hash = self.put(task_metadata)
-        return {'udf_init_hash': udf_init_hash,
-                'task_metadata_hash': task_metadata_hash}
+        task_metadata = {'corrections': self.put(corrections),
+                         'roi': self.put(roi),
+                         'backends': self.put(backends)}
 
-    def _convert_task_format(self, hashes, idx, partition):
-        udf_init_hash = hashes['udf_init_hash']
-        task_metadata_hash = hashes['task_metadata_hash']
-        return {'callable': ray_task_creator,
-                'args': [udf_init_hash, task_metadata_hash, idx, partition],
-                'kwargs': {}}
+        return {'udf_init': udf_init_hash,
+                **task_metadata}
+
+    def _add_local_task_info(self, global_task_dict, partition_idx, partition):
+        return {**global_task_dict, 'partition_idx': partition_idx, 'partition': partition}
+
+    def _link_task_callable(self, task_dict):
+        return {'callable': ray_task_creator, 'kwargs': task_dict}
+
 
 
 def ray_as_completed(futures, num_returns=1, fetch_local=True, **kwargs):
@@ -272,8 +272,8 @@ def run_remote_wrapper(fn, *args, **kwargs):
 
 
 @ray.remote
-def ray_task_creator(udf_init, task_metadata, partition_idx, partition,
-                                    *args, env=None, task_idx=None, **kwargs):
+def ray_task_creator(*, udf_init, corrections, roi, backends,
+                        partition_idx, partition, env, task_idx):
     """
     Executed for each partition as a remote function
     UDFs are init'd, buffers allocated for the partition
@@ -283,21 +283,14 @@ def ray_task_creator(udf_init, task_metadata, partition_idx, partition,
     because once a function has been decorated as remote
     I don't see quite how to wrap its return values
     """
-    # import internal to function to avoid circular dependency
-    # this would be refactored out in a real implementation of RayExecutor
-    from libertem.udf.base import UDFTask
-
     udfs = [ud['class'](**ud['kwargs']) for ud in udf_init]
-    roi = task_metadata['roi']
-    corrections = task_metadata['corrections']
-    backends = task_metadata['backends']
 
     for udf in udfs:
         udf.params.new_for_partition(partition, roi)
 
     task_result = UDFTask(
         partition=partition, idx=partition_idx, udfs=udfs, roi=roi, corrections=corrections,
-        backends=backends)(*args, env=env, **kwargs)
+        backends=backends)(env=env)
     
     return {
             "task_result": task_result,
@@ -332,13 +325,14 @@ class RayExecutor(CommonRayMixin, JobExecutor):
     def run_tasks(self, tasks, cancel_id):
         tasks = list(tasks)
 
+        env = Environment(threads_per_worker=1)
+        for idx, task_dict in enumerate(tasks):
+            task_dict['env'] = env
+            task_dict['task_idx'] = idx
+        tasks = [self._link_task_callable(task_dict) for task_dict in tasks]
+
         def _id_to_task(task_id):
             return tasks[task_id]
-
-        for idx, task_dict in enumerate(tasks):
-            env = Environment(threads_per_worker=1)
-            task_dict['kwargs']['env'] = env
-            task_dict['kwargs']['task_idx'] = idx
 
         futures = self._get_futures(tasks)
         self._futures[cancel_id] = futures
@@ -354,7 +348,7 @@ class RayExecutor(CommonRayMixin, JobExecutor):
                         raise JobCancelledError()
                     result = result_wrap['task_result']
                     task_dict = _id_to_task(result_wrap['task_id'])
-                    task = TaskRecord(task_dict['args'][-1])
+                    task = TaskRecord(task_dict['kwargs']['partition'])
                     yield result, task
         finally:
             if cancel_id in self._futures:
