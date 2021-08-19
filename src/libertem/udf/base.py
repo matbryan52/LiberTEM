@@ -1525,6 +1525,10 @@ class UDFRunner:
         return roi.reshape(-1)[partition.slice.get(nav_only=True)]
 
     def _make_udf_tasks(self, dataset: DataSet, roi, corrections, backends, executor):
+        # As we are storing big variables once for all Tasks we need to
+        # create the tasks differently depending on whether we are using Ray
+        # or InLine/Dask, this is clearly not a good way to do it but it
+        # requires minimal modification to this function and other code
         ray_exec = hasattr(executor, '_store_global_task_info')
         if ray_exec:
             global_task_dict = executor._store_global_task_info(self._udfs, corrections,
@@ -1538,6 +1542,9 @@ class UDFRunner:
                     continue
 
             if ray_exec:
+                # We are yielding dictionaries which contain (references to) all the
+                # arguments which are otherwise passed to UDFTask below. We aren't
+                # passing UDF objects, but rather UDF.__class__ and their kwargs.
                 yield executor._add_local_task_info(global_task_dict, idx, partition)
             else:
                 udfs = [

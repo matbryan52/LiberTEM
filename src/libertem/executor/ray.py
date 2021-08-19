@@ -14,6 +14,17 @@ from libertem.udf.base import UDFTask
 log = logging.getLogger(__name__)
 
 
+"""
+I've tried to follow the structure of dask.py where practical,
+but some of the concepts don't really transfer over, particularly
+node/worker locations and resource allocation, not without quite
+substantial refactoring.
+
+As a result some of the functions don't really make sense
+even though I've tried to convert them
+"""
+
+
 def cluster_spec(cpus, cudas, has_cupy, name='default', num_service=0, options=None):
 
     if options is None:
@@ -70,15 +81,84 @@ def cluster_spec(cpus, cudas, has_cupy, name='default', num_service=0, options=N
     return workers_spec
 
 
+def ray_as_completed(futures, num_returns=1, fetch_local=True, **kwargs):
+    """
+    A generator around a list of Ray futures which yields num_returns
+    futures at a time, in as-completed order. The caller then needs to
+    call ray.get to actually get the result from the future.
+
+    - fetch_local : pre-fetches results onto the local node before
+    declaring that a future has completed
+
+    This fills the same role as dd.as_completed(futures) in Dask
+    """
+    unfinished = futures
+    while unfinished:
+        finished, unfinished = ray.wait(unfinished,
+                                        num_returns=num_returns,
+                                        fetch_local=fetch_local,
+                                        **kwargs)
+        yield finished
+
+
+@ray.remote
+def run_remote_wrapper(fn, *args, **kwargs):
+    """
+    A wrapper around a function to run it remotely
+
+    The function will be serialized before being run each time
+    with no holding of the serialied form on workers.
+
+    This is a Ray anti-pattern but does work for
+    the cases where it is needed (for example in executor.run_function)
+    """
+    return fn(*args, **kwargs)
+
+
+@ray.remote
+def ray_task_creator(*, udf_init, corrections, roi, backends,
+                    partition_idx, partition, env, task_idx):
+    """
+    Executes the task as a remote job. This remotely does
+    what UDFRunner._make_udf_tasks() does currently.
+
+    It is executed for each partition as a remote function:
+    UDFs are init'd, buffers allocated for the partition
+    UDFTask created and then called
+
+    This could be done better with a Ray-specific
+    stateful UDFRunner with a method which creates a task,
+    called once for each partition.
+
+    I am hacking in the functionality of TaskProxy here
+    because once a function has been decorated as remote
+    it's inefficient to re-wrap its return values
+    """
+    udfs = [ud['class'](**ud['kwargs']) for ud in udf_init]
+
+    for udf in udfs:
+        udf.params.new_for_partition(partition, roi)
+
+    task_result = UDFTask(
+        partition=partition, idx=partition_idx, udfs=udfs, roi=roi, corrections=corrections,
+        backends=backends)(env=env)
+
+    return {
+            "task_result": task_result,
+            "task_id": task_idx,
+            }
+
 class CommonRayMixin:
 
     def _resources_available(self, workers, resources):
+        """Placeholder function"""
         def filter_fn(worker):
             return all(worker.resources.get(key, 0) >= resources[key] for key in resources.keys())
 
         return len(workers.filter(filter_fn))
 
     def has_libertem_resources(self):
+        """Placeholder function"""
         workers = self.get_available_workers()
 
         def has_resources(worker):
@@ -90,10 +170,14 @@ class CommonRayMixin:
 
     def _get_futures(self, tasks, *args, **kwargs):
         '''
-        Expect tasks to be a list of dictionaries
-        [{'callable':fn, 'args':[], 'kwargs'}]
-        or a list of callable in which case *args/**kwargs
-        are passed. Callables are assumed to be remote fns
+        Submit jobs to the cluster
+
+        Tasks is either:
+         - a list of dictionaries
+            [{'callable':fn, 'args':[], 'kwargs'}]
+        or
+         - a list of callable
+           in which case *args/**kwargs are passed to all
         '''
         available_workers = self.get_available_workers()
         if len(available_workers) == 0:
@@ -112,6 +196,12 @@ class CommonRayMixin:
         return futures
 
     def call_remote(self, fn, *args, **kwargs):
+        """
+        Call fn remote task with args and kwargs
+        If fn was already decorated as a @ray.remote procedure
+        then call this directly, otherwise use the wrapper
+        to serialize fn and call it immediately
+        """
         try:
             return fn.remote(*args, **kwargs)
         except AttributeError:
@@ -158,6 +248,10 @@ class CommonRayMixin:
         return details_sorted
 
     def _store_global_task_info(self, _udfs, corrections, roi, backends):
+        """
+        Put Task constant initialization variables into global shared
+        memory and return a dict of ray.ObjectRef hashes
+        """
         udf_init_info = []
         for udf in _udfs:
             udf_init_info.append({'class': udf.__class__, 'kwargs': udf._kwargs})
@@ -171,55 +265,28 @@ class CommonRayMixin:
                 **task_metadata}
 
     def _add_local_task_info(self, global_task_dict, partition_idx, partition):
+        """
+        Add the partition-specific items for running a UDFTask
+        to a new dictionary with the global hashes, used to
+        initialize the remote job
+        """
         return {**global_task_dict, 'partition_idx': partition_idx, 'partition': partition}
 
     def _link_task_callable(self, task_dict):
+        """
+        Wrap the task definition dictionary with the callable
+        ran as a remote task
+        """
         return {'callable': ray_task_creator, 'kwargs': task_dict}
 
 
-def ray_as_completed(futures, num_returns=1, fetch_local=True, **kwargs):
-    unfinished = futures
-    while unfinished:
-        finished, unfinished = ray.wait(unfinished,
-                                        num_returns=num_returns,
-                                        fetch_local=fetch_local,
-                                        **kwargs)
-        yield finished
-
-
-@ray.remote
-def run_remote_wrapper(fn, *args, **kwargs):
-    return fn(*args, **kwargs)
-
-
-@ray.remote
-def ray_task_creator(*, udf_init, corrections, roi, backends,
-                    partition_idx, partition, env, task_idx):
-    """
-    Executed for each partition as a remote function
-    UDFs are init'd, buffers allocated for the partition
-    UDFTask created and then called
-
-    I am hacking in the functionality of TaskProxy here
-    because once a function has been decorated as remote
-    I don't see quite how to wrap its return values
-    """
-    udfs = [ud['class'](**ud['kwargs']) for ud in udf_init]
-
-    for udf in udfs:
-        udf.params.new_for_partition(partition, roi)
-
-    task_result = UDFTask(
-        partition=partition, idx=partition_idx, udfs=udfs, roi=roi, corrections=corrections,
-        backends=backends)(env=env)
-
-    return {
-            "task_result": task_result,
-            "task_id": task_idx,
-            }
-
-
 class TaskRecord(object):
+    """
+    Translation layer to allow downstream code
+    to function without modification
+    
+    Unecessary after refactoring
+    """
     def __init__(self, partition):
         self.partition = partition
 
@@ -234,17 +301,34 @@ class RayExecutor(CommonRayMixin, JobExecutor):
         self._futures = {}
 
     def put(self, obj):
+        """
+        Put an item into global shared memory and get its hash
+        """
         obj_reference = ray.put(obj)
         return obj_reference
 
     def get(self, obj_reference):
         """
+        Get one or more objects from shared memory
+
         obj_reference can be a list
         """
         objs = ray.get(obj_reference)
         return objs
 
     def run_tasks(self, tasks, cancel_id):
+        """
+        Run tasks in a way compatible with existing code
+
+        Expects tasks to be a list of dictionaries of kwargs
+        typically generated with self.__store_global_task_info
+        and self._add_local_task_info together
+
+        Yields (result, task) tuples compatible with downstream
+        code, although we don't actually have the UDFTask object
+        so the task is replaced with a TaskRecord instance with
+        the partition attribute for compatibility
+        """
         tasks = list(tasks)
 
         env = Environment(threads_per_worker=1)
