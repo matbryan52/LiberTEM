@@ -1527,7 +1527,8 @@ class UDFRunner:
     def _make_udf_tasks(self, dataset: DataSet, roi, corrections, backends, executor):
         ray_exec = hasattr(executor, '_store_global_task_info')
         if ray_exec:
-            global_task_dict = executor._store_global_task_info(self._udfs, corrections, roi, backends)
+            global_task_dict = executor._store_global_task_info(self._udfs, corrections,
+                                                                roi, backends)
 
         for idx, partition in enumerate(dataset.get_partitions()):
             if roi is not None:
