@@ -1,7 +1,6 @@
 from copy import deepcopy
 import functools
 import logging
-import signal
 
 import ray
 
@@ -69,6 +68,7 @@ def cluster_spec(cpus, cudas, has_cupy, name='default', num_service=0, options=N
         workers_spec[f'{name}-cuda-{cuda}'] = cuda_spec
 
     return workers_spec
+
 
 class CommonRayMixin:
 
@@ -212,7 +212,7 @@ def ray_task_creator(*, udf_init, corrections, roi, backends,
     task_result = UDFTask(
         partition=partition, idx=partition_idx, udfs=udfs, roi=roi, corrections=corrections,
         backends=backends)(env=env)
-    
+
     return {
             "task_result": task_result,
             "task_id": task_idx,
@@ -351,7 +351,6 @@ class RayExecutor(CommonRayMixin, JobExecutor):
         ray.init(*args, **kwargs)
         client = {'args':args, 'kwargs':kwargs}
         return cls(client, is_local=False, lt_resources=None)
-
 
     @classmethod
     def make_local(cls, default_cluster=False, spec=None, cluster_kwargs=None, client_kwargs=None):
