@@ -194,7 +194,7 @@ def run_remote_wrapper(fn, *args, **kwargs):
 
 @ray.remote
 def ray_task_creator(*, udf_init, corrections, roi, backends,
-                        partition_idx, partition, env, task_idx):
+                    partition_idx, partition, env, task_idx):
     """
     Executed for each partition as a remote function
     UDFs are init'd, buffers allocated for the partition
@@ -309,7 +309,7 @@ class RayExecutor(CommonRayMixin, JobExecutor):
                 try:
                     result = ray.get(c_future)
                 except ray.exceptions.TaskCancelledError:
-                    raise JobCancelledError()           
+                    raise JobCancelledError()
             yield result
 
     def run_function(self, fn, *args, **kwargs):
@@ -317,7 +317,7 @@ class RayExecutor(CommonRayMixin, JobExecutor):
         run a callable `fn` on any worker
         """
         future = run_remote_wrapper.remote(fn, *args, **kwargs)
-        return ray.get(future)        
+        return ray.get(future)
 
     def map(self, fn, iterable):
         """
@@ -349,7 +349,7 @@ class RayExecutor(CommonRayMixin, JobExecutor):
             the connected JobExecutor
         """
         ray.init(*args, **kwargs)
-        client = {'args':args, 'kwargs':kwargs}
+        client = {'args': args, 'kwargs': kwargs}
         return cls(client, is_local=False, lt_resources=None)
 
     @classmethod
