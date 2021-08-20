@@ -10,6 +10,7 @@ from .base import (
 )
 from .scheduler import Worker, WorkerSet
 from libertem.udf.base import UDFTask
+from libertem.common.backend import set_use_cpu, set_use_cuda
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,18 @@ substantial refactoring.
 As a result some of the functions don't really make sense
 even though I've tried to convert them
 """
+
+def worker_setup(resource, device):
+    # Disable handling Ctrl-C on the workers for a local cluster
+    # since the nanny restarts workers in that case and that gets mixed
+    # with Ctrl-C handling of the main process, at least on Windows
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    if resource == "CUDA":
+        set_use_cuda(device)
+    elif resource == "CPU":
+        set_use_cpu(device)
+    else:
+        raise ValueError("Unknown resource %s, use 'CUDA' or 'CPU'", resource)
 
 
 def cluster_spec(cpus, cudas, has_cupy, name='default', num_service=0, options=None):
