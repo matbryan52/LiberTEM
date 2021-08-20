@@ -21,8 +21,8 @@ class SumUDF(UDF):
     >>> np.array(result["intensity"]).shape
     (32, 32)
     """
-    def __init__(self, dtype='float32'):
-        super().__init__(dtype=dtype)
+    def __init__(self, dtype='float32', **kwargs):
+        super().__init__(dtype=dtype, **kwargs)
 
     def get_preferred_input_dtype(self):
         return self.params.dtype
