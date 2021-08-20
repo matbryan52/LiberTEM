@@ -459,7 +459,7 @@ class RayExecutor(CommonRayMixin, JobExecutor):
         return cls(client, is_local=False, lt_resources=None)
 
     @classmethod
-    def make_local(cls, default_cluster=False, spec=None, cluster_kwargs=None, client_kwargs=None):
+    def make_local(cls, default_cluster=False, include_dashboard=False, spec=None, cluster_kwargs=None, client_kwargs=None):
         """
         Spin up a local Ray cluster
 
@@ -492,7 +492,7 @@ class RayExecutor(CommonRayMixin, JobExecutor):
             ray_args = {}
 
         if not ray.is_initialized():
-            ray.init(**ray_args)
+            ray.init(include_dashboard=include_dashboard, **ray_args)
         else:
             log.warn('Ray has already been intialized, trying with existing cluster')
         return cls(client=None, is_local=True, lt_resources=True)
