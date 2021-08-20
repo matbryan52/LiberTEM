@@ -1,6 +1,7 @@
 from copy import deepcopy
 import functools
 import logging
+import signal
 
 import ray
 
