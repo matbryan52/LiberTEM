@@ -222,13 +222,21 @@ class CommonRayMixin:
             return run_remote_wrapper.remote(fn, *args, **kwargs)
 
     def get_available_workers(self):
+        """
+        I implicitly define one worker per CPU resource available
+        to the Ray cluster, this doesn't quite match up with how
+        DaskJobExecutor returns this structure, to refactor
+
+        This doesnt yet handle correctly allocating GPUs
+        """
         return WorkerSet([
             Worker(
-                name=worker['NodeID'],
+                name=f'{worker["NodeID"]}:{cpu_idx}',
                 host=worker['NodeManagerAddress'],
-                resources=worker['Resources']
+                resources={'CPU': 1}
             )
-            for worker in ray.nodes()
+            for worker in ray.nodes() for cpu_idx, cpu in
+            enumerate(range(int(worker['Resources']['CPU'])))
         ])
 
     def get_resource_details(self):
