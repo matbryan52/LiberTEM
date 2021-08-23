@@ -56,7 +56,7 @@ class InlineJobExecutor(JobExecutor):
     def run_each_worker(self, fn, *args, **kwargs):
         return {"inline": fn(*args, **kwargs)}
 
-    def get_available_workers(self):
+    def get_available_workers(self, cpu_only=False):
         resources = {"compute": 1, "CPU": 1}
         if get_use_cuda() is not None:
             resources["CUDA"] = 1

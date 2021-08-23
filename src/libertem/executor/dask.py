@@ -183,7 +183,7 @@ class CommonDaskMixin:
             for task in tasks
         ])
 
-    def get_available_workers(self):
+    def get_available_workers(self, cpu_only=False):
         info = self.client.scheduler_info()
         return WorkerSet([
             Worker(
@@ -192,6 +192,7 @@ class CommonDaskMixin:
                 resources=worker['resources']
             )
             for worker in info['workers'].values()
+            if (not cpu_only) or worker['resources'].get('CPU', 0) > 0
         ])
 
     def get_resource_details(self):

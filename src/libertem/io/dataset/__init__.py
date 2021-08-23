@@ -61,7 +61,7 @@ def load(filetype, *args, enable_async=False, executor, **kwargs):
     async def _init_async():
         ds = cls(*args, **kwargs)
         ds = await sync_to_async(ds.initialize, executor=executor.ensure_sync())
-        workers = await executor.get_available_workers()
+        workers = await executor.get_available_workers(cpu_only=True)
         ds.set_num_cores(len(workers))
         await executor.run_function(ds.check_valid)
         return ds
@@ -71,7 +71,7 @@ def load(filetype, *args, enable_async=False, executor, **kwargs):
     else:
         ds = cls(*args, **kwargs)
         ds = ds.initialize(executor)
-        ds.set_num_cores(len(executor.get_available_workers()))
+        ds.set_num_cores(len(executor.get_available_workers(cpu_only=True)))
         executor.run_function(ds.check_valid)
         return ds
 
