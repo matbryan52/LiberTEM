@@ -119,7 +119,7 @@ class RawFileDataSet(DataSet):
     """
     def __init__(self, path, dtype, scan_size=None, detector_size=None, enable_direct=False,
                  detector_size_raw=None, crop_detector_to=None, tileshape=None,
-                 nav_shape=None, sig_shape=None, sync_offset=0, io_backend=None):
+                 nav_shape=None, sig_shape=None, sync_offset=0, io_backend=None, npart=None):
         super().__init__(io_backend=io_backend)
         # handle backwards-compatability:
         if tileshape is not None:
@@ -174,6 +174,7 @@ class RawFileDataSet(DataSet):
             )
         self._enable_direct = enable_direct
         self._filesize = None
+        self._npart = npart
 
     def initialize(self, executor):
         self._filesize = executor.run_function(self._get_filesize)
@@ -250,10 +251,13 @@ class RawFileDataSet(DataSet):
         returns the number of partitions the dataset should be split into
         """
         # let's try to aim for 1024MB (converted float data) per partition
-        partition_size_px = 1024 * 1024 * 1024 // 4
-        total_size_px = np.prod(self.shape, dtype=np.int64)
-        res = max(self._cores, total_size_px // partition_size_px)
-        return res
+        if self._npart is None:
+            partition_size_px = 1024 * 1024 * 1024 // 4
+            total_size_px = np.prod(self.shape, dtype=np.int64)
+            res = max(self._cores, total_size_px // partition_size_px)
+            return res
+        else:
+            return self._npart
 
     def get_partitions(self):
         fileset = self._get_fileset()
