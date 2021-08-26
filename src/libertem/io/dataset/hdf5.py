@@ -5,6 +5,7 @@ import time
 
 import numpy as np
 import h5py
+import hdf5plugin
 
 from libertem.common import Slice, Shape
 from libertem.common.buffers import zeros_aligned
