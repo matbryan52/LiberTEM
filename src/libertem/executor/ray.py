@@ -221,7 +221,7 @@ class CommonRayMixin:
         except AttributeError:
             return run_remote_wrapper.remote(fn, *args, **kwargs)
 
-    def get_available_workers(self):
+    def get_available_workers(self, cpu_only=False):
         """
         I implicitly define one worker per CPU resource available
         to the Ray cluster, this doesn't quite match up with how
