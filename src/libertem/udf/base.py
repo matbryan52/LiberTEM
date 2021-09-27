@@ -293,6 +293,24 @@ class UDFData:
             if v and v.has_data()
         })
 
+    def get_proxy_masked(self, nav_mask):
+        proxy_dict = {}
+        for k, v in self.items():
+            if v and v.has_data():
+                if v.kind == 'nav':
+                    proxy_dict[k] = self._data[k].raw_data[nav_mask.ravel()]
+                else:
+                    proxy_dict[k] = self._data[k].raw_data
+        return MergeAttrMapping(proxy_dict)
+
+    def finalize(self):
+        """
+        Avoids unwanted behaviour from uncontrollable '_get_view_or_data' => raw_data
+        Forces returned buffers to have correct shape not flat/raw shape
+        """
+        res_dict = {k: self._data[k].data for k in self.keys()}
+        return UDFData(res_dict)
+
     def _get_buffers(self, filter_allocated: bool = False):
         for k, buf in self._data.items():
             if not hasattr(buf, 'has_data') or (buf.has_data() and filter_allocated):

@@ -1,0 +1,7 @@
+sudo umount /mnt/hugepages
+gid=`id -g`
+uid=`id -u`
+sudo mount -t hugetlbfs -o uid=$uid -o gid=$gid none /mnt/hugepages
+sudo bash -c "echo $gid > /proc/sys/vm/hugetlb_shm_group"
+sudo bash -c "echo 20000 > /proc/sys/vm/nr_hugepages"
+plasma_store -s /tmp/plasma -m 1000000000 -d /mnt/hugepages -h
