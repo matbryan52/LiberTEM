@@ -18,6 +18,7 @@ import MRCParamsForm from "./MRCParamsForm";
 import RawFileParamsForm from "./RawFileParamsForm";
 import SEQParamsForm from "./SEQParamsForm";
 import SERParamsForm from "./SERParamsForm";
+import CEAPrecParamsForm from "./CEAPrecParamsForm";
 
 
 /**
@@ -209,6 +210,11 @@ const DatasetOpen = () => {
             const initial = formInitial && datasetType === formInitial.type ? formInitial : undefined;
             const info = formInfo && datasetType === formInfo.type ? formInfo : undefined;
             return renderForm(<MRCParamsForm {...commonParams} initial={initial} info={info} />);
+        }
+        case DatasetTypes.CEAPREC: {
+            const initial = formInitial && datasetType === formInitial.type ? formInitial : undefined;
+            const info = formInfo && datasetType === formInfo.type ? formInfo : undefined;
+            return renderForm(<CEAPrecParamsForm {...commonParams} initial={initial} info={info} />);
         }
     }
     return assertNotReached("unknown dataset type");
