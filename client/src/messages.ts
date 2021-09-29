@@ -111,6 +111,7 @@ export enum DatasetTypes {
     EMPAD = "EMPAD",
     SEQ = "SEQ",
     MRC = "MRC",
+    CEAPREC = "CEAPREC",
 }
 
 export interface DatasetParamsCommon {
@@ -154,6 +155,17 @@ export type DatasetParamsRaw = {
 
 export interface DatasetInfoRAW {
     type: DatasetTypes.RAW,
+}
+
+export type DatasetParamsCEAPREC = {
+    type: DatasetTypes.CEAPREC,
+    path: string,
+    dtype: string,
+    enable_direct: boolean,
+} & DatasetParamsCommon
+
+export interface DatasetInfoCEAPREC {
+    type: DatasetTypes.CEAPREC,
 }
 
 export type DatasetParamsMIB = {
@@ -228,9 +240,9 @@ export type DatasetInfoMRC = {
     type: DatasetTypes.MRC,
 } & DatasetInfoCommon
 
-export type DatasetFormParams = DatasetParamsHDF5 | DatasetParamsRaw | DatasetParamsMIB | DatasetParamsBLO | DatasetParamsK2IS | DatasetParamsSER | DatasetParamsFRMS6 | DatasetParamsEMPAD | DatasetParamsSEQ | DatasetParamsMRC
+export type DatasetFormParams = DatasetParamsHDF5 | DatasetParamsRaw | DatasetParamsMIB | DatasetParamsBLO | DatasetParamsK2IS | DatasetParamsSER | DatasetParamsFRMS6 | DatasetParamsEMPAD | DatasetParamsSEQ | DatasetParamsMRC | DatasetParamsCEAPREC
 
-export type DatasetFormInfo = DatasetInfoHDF5 | DatasetInfoRAW | DatasetInfoMIB | DatasetInfoBLO | DatasetInfoK2IS | DatasetInfoSER | DatasetInfoFRMS6 | DatasetInfoEMPAD | DatasetInfoSEQ | DatasetInfoMRC
+export type DatasetFormInfo = DatasetInfoHDF5 | DatasetInfoRAW | DatasetInfoMIB | DatasetInfoBLO | DatasetInfoK2IS | DatasetInfoSER | DatasetInfoFRMS6 | DatasetInfoEMPAD | DatasetInfoSEQ | DatasetInfoMRC | DatasetInfoCEAPREC
 
 export interface DatasetCreateParams {
     id: string,
