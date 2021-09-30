@@ -174,17 +174,8 @@ class CEAPrecessionDataset(RawFileDataSet):
 
     @classmethod
     def _parse_meta(cls, path):
-        filelist = [f for f in path.parent.iterdir()]
-        files = cls._split_files_by_filetype(filelist)
-        found_files = set(files.keys())
-        if not found_files == cls.get_supported_extensions():
-            raise ValueError(f"CEAPrecessionDataset found missing or\
-                            unrecognized filetypes {found_files}")
-        if len(files['txt']) > 1:
-            warnings.warn(f"Found {len(files['txt'])} .txt\
-                        files, using {files['txt'][0].name}")
-
-        return PrecessionNotes(files['txt'][0])
+        assert path.suffix == '.txt'
+        return PrecessionNotes(path)
 
     @staticmethod
     def _split_files_by_filetype(filelist):
