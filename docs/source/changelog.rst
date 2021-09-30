@@ -11,7 +11,7 @@ Changelog
 
 .. _continuous:
 
-0.8.0.dev0
+0.9.0.dev0
 ##########
 
 .. toctree::
@@ -19,7 +19,62 @@ Changelog
 
   changelog/*/*
 
+.. _`v0-8-0`:
+
 .. _latest:
+
+0.8.0 / release pending
+#######################
+
+This release mainly contains improvements of center of mass / first moment
+analysis and support for starting the web GUI from JupyterHub or JupyterLab.
+
+New features
+------------
+
+* Support for center of mass with annular masks in :meth:`~libertem.api.Context.create_com_analysis`,
+  :class:`~libertem.analysis.com.COMAnalysis` and the GUI (:issue:`633`, :pr:`1089`).
+* Support in the GUI for specifying rotation of scan against detector and
+  flipping the detector y axis (:pr:`1087`, :issue:`31`). Previously this was only
+  supported in the Python API.
+* Tweaks and instructions for JupyterHub and JupyterLab integration in LiberTEM, see :ref:`jupyter integration` (:pr:`1074`).
+  New package `LiberTEM/LiberTEM-jupyter-proxy <https://github.com/LiberTEM/LiberTEM-jupyter-proxy>`_
+  for interfacing.
+* In the web API, support was added to re-run visualization only, without
+  re-running UDFs for an analysis. This allows for almost instant feedback
+  for some operations, like changing CoM parameters.
+* Added token-based authentication. For now, it is only usable via
+  integrations like Jupyter. It will be extended to local/manual usage
+  later (:pr:`1074`, :issue:`1097`). Please comment on :issue:`1097` if local/manual use
+  would be beneficial for you so that it is prioritized accordingly.
+* SEQ dataset: Added support for loading excluded pixels from XML (:issue:`805`, :pr:`1077`).
+  See :class:`~libertem.io.dataset.seq.SEQDataSet` for more information.
+
+Bugfixes
+--------
+
+* Assert that the :code:`files` argument to :class:`~libertem.io.dataset.dm.DMDataSet` is actually a list or tuple,
+  to prevent iterating over a string path (:pr:`1058`).
+* Escape globs to support special characters in file names for multi-file
+  datasets (:issue:`1066`, :pr:`1067`).
+* Make sure multithreading in the main process still works properly after
+  launching a :class:`~libertem.api.Context` (:issue:`1053`, :pr:`1100`).
+* Allow custom plots to return RGB as plot data, for example a color
+  wheel for vector fields (:issue:`1052`, :pr:`1101`).
+* Adjust partition count to match the number of CPU compute workers,
+  not total workers to prevent residual partitions (:issue:`1086`, :pr:`1103`).
+
+Documentation
+-------------
+
+* Note on handling HDF5 files with non-standard compression
+  in :class:`~libertem.io.dataset.hdf5.H5DataSet` (:pr:`1059`).
+* Link to two more public datasets: :ref:`hires STO` and :ref:`synthetic STO` (:pr:`1073`).
+
+Many thanks to our new contributors Levente Puskás for the excluded pixel loading and to
+Matthew Bryan for figuring non-standard compression in HDF5 and improving DM
+input validation. Congratulations to Alex for closing the long-standing CoM issue :issue:`31`
+and for enabling easy and secure access to the web interface on shared IT infrastructure.
 
 .. _`v0-7-1`:
 
@@ -204,7 +259,7 @@ New features
 * GUI: Filebrowser improvements: users can star directories in the file browser for easy navigation (:pr:`772`).
 * Support for running multiple UDFs "at the same time", not yet exposed in public APIs (:pr:`788`).
 * GUI: Users can add or remove scan size dimensions according to the dataset's shape (:pr:`779`).
-* GUI: Shutdown button to stop server, useful for example for jupyterhub integration (:pr:`786`).
+* GUI: Shutdown button to stop server, useful for example for JupyterHub integration (:pr:`786`).
 * Infrastructure for consistent coordinate transforms are added in
   :mod:`libertem.corrections.coordinates` and :mod:`libertem.utils`. See also a
   description of coordinate systems in :ref:`concepts`.

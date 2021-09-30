@@ -87,7 +87,7 @@ which has the following license:
     (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
     SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-Confirm message on exit using ctrl+c is implemented by referencing jupyter
+Confirm message on exit using ctrl+c is implemented by referencing Jupyter
 notebook project, which has the following license:
 
 .. code-block:: text
@@ -258,6 +258,19 @@ Gatan Inc.
 
 STEMx equipment and software for 4D STEM data acquisition with K2 IS camera
 courtesy of `Gatan Inc <https://www.gatan.com/>`_.
+|itemend|
+
+AIDAS
+.....
+
+|itemstart|
+
+.. image:: images/AIDAS-logo.png
+    :width: 100px
+    :alt: AIDAS
+
+LiberTEM development is supported by `AIDAS
+<https://www.fz-juelich.de/SharedDocs/Meldungen/PORTAL/EN/2021/2021-06-24-AIDAS_en.html>`_.
 |itemend|
 
 Forschungszentrum Jülich, Ernst-Ruska Centrum

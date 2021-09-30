@@ -189,7 +189,7 @@ have changed.
 
 After updating the installation, you can run the updated version by restarting
 the libertem-server and afterwards reloading all browser windows that are
-running the LiberTEM GUI. In other environments, like jupyter notebooks, you
+running the LiberTEM GUI. In other environments, like Jupyter notebooks, you
 need to restart the Python interpreter to make sure the new version is used,
 for example by restarting the ipython kernel.
 
@@ -199,7 +199,7 @@ Windows
 -------
 
 The recommended method to install LiberTEM on Windows is based on `Miniconda 64
-bit with a compatible Python version <https://www.anaconda.com/distribution/>`_.
+bit with a compatible Python version <https://conda.io/miniconda.html>`_.
 This installs a Python distribution.
 
 The installation and running of LiberTEM on Windows with the
@@ -223,3 +223,11 @@ Troubleshooting
 If you are having trouble with the installation, please let us know by
 either `filing an issue  <https://github.com/liberTEM/LiberTEM/issues>`_
 or by asking on `our Gitter channel <https://gitter.im/LiberTEM/Lobby>`_.
+
+Integration
+-----------
+
+.. toctree::
+    :maxdepth: 2
+
+    jupyter

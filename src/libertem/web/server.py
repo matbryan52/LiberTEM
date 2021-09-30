@@ -7,12 +7,16 @@ import select
 import threading
 import webbrowser
 from functools import partial
+import hmac
+import hashlib
+import time
 
 import tornado.web
 import tornado.gen
 import tornado.websocket
 import tornado.ioloop
 import tornado.escape
+from tornado import httputil
 
 from .shutdown import ShutdownHandler
 from .state import SharedState
@@ -37,74 +41,79 @@ class IndexHandler(tornado.web.RequestHandler):
         self.render("client/index.html")
 
 
-def make_app(event_registry, shared_state):
+def _get_token(request):
+    token = request.query_arguments.get('token', [b''])[0].decode("utf-8")
+    if not token:
+        token = request.headers.get('X-Api-Key', '')
+    return token
+
+
+def _write_token_mismatch_error(request):
+    start_line = httputil.ResponseStartLine("", 400, "bad request: token mismatch")
+    headers = httputil.HTTPHeaders({
+        "Content-Type": "text/html; charset=UTF-8",
+        "Date": httputil.format_timestamp(time.time()),
+    })
+    return request.connection.write_headers(
+        start_line, headers, b""
+    )
+
+
+def check_token_auth_middleware(app, expected_token):
+    # bypass token check if no token is set:
+    if expected_token is None:
+        return lambda r: app(r)
+
+    expected_hash = hashlib.sha256(expected_token.encode("utf8")).hexdigest()
+
+    def _middleware(request):
+        # NOTE: token length may be leaked here
+        given_token = _get_token(request)
+        given_hash = hashlib.sha256(given_token.encode("utf8")).hexdigest()
+        if not hmac.compare_digest(given_hash, expected_hash):
+            return _write_token_mismatch_error(request)
+        return app(request)
+
+    return _middleware
+
+
+def make_app(event_registry, shared_state, token=None):
+    """
+    Returns the fully assembled web API app, which is a
+    callable(request) (not the "raw" tornado Application
+    instance, because we want to apply middleare around it)
+    """
     settings = {
         "static_path": os.path.join(os.path.dirname(__file__), "client"),
     }
-    return tornado.web.Application([
-        (r"/", IndexHandler, {"state": shared_state, "event_registry": event_registry}),
-        (r"/api/datasets/detect/", DataSetDetectHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/datasets/schema/", DataSetOpenSchema, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/datasets/([^/]+)/", DataSetDetailHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/browse/localfs/", LocalFSBrowseHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/jobs/([^/]+)/", JobDetailHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/compoundAnalyses/([^/]+)/analyses/([^/]+)/", AnalysisDetailHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/compoundAnalyses/([^/]+)/analyses/([^/]+)/download/([^/]+)/",
-        DownloadDetailHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/compoundAnalyses/([^/]+)/copy/notebook/", CopyScriptHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/compoundAnalyses/([^/]+)/download/notebook/", DownloadScriptHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/compoundAnalyses/([^/]+)/", CompoundAnalysisHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/events/", ResultEventHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/shutdown/", ShutdownHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/config/", ConfigHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/config/cluster/", ClusterDetailHandler, {
-            "state": shared_state,
-            "event_registry": event_registry
-        }),
-        (r"/api/config/connection/", ConnectHandler, {
-            "state": shared_state,
-            "event_registry": event_registry,
-        }),
+    common_kwargs = {
+        "state": shared_state,
+        "event_registry": event_registry,
+    }
+    app = tornado.web.Application([
+        (r"/", IndexHandler, common_kwargs),
+        (r"/api/datasets/detect/", DataSetDetectHandler, common_kwargs),
+        (r"/api/datasets/schema/", DataSetOpenSchema, common_kwargs),
+        (r"/api/datasets/([^/]+)/", DataSetDetailHandler, common_kwargs),
+        (r"/api/browse/localfs/", LocalFSBrowseHandler, common_kwargs),
+        (r"/api/jobs/([^/]+)/", JobDetailHandler, common_kwargs),
+        (r"/api/compoundAnalyses/([^/]+)/analyses/([^/]+)/", AnalysisDetailHandler, common_kwargs),
+        (
+            r"/api/compoundAnalyses/([^/]+)/analyses/([^/]+)/download/([^/]+)/",
+            DownloadDetailHandler,
+            common_kwargs
+        ),
+        (r"/api/compoundAnalyses/([^/]+)/copy/notebook/", CopyScriptHandler, common_kwargs),
+        (r"/api/compoundAnalyses/([^/]+)/download/notebook/", DownloadScriptHandler, common_kwargs),
+        (r"/api/compoundAnalyses/([^/]+)/", CompoundAnalysisHandler, common_kwargs),
+        (r"/api/events/", ResultEventHandler, common_kwargs),
+        (r"/api/shutdown/", ShutdownHandler, common_kwargs),
+        (r"/api/config/", ConfigHandler, common_kwargs),
+        (r"/api/config/cluster/", ClusterDetailHandler, common_kwargs),
+        (r"/api/config/connection/", ConnectHandler, common_kwargs),
     ], **settings)
+    app = check_token_auth_middleware(app, token)
+    return app
 
 
 async def do_stop(shared_state):
@@ -139,15 +148,16 @@ def sig_exit(signum, frame, shared_state):
     )
 
 
-def main(host, port, numeric_level, event_registry, shared_state):
+def main(host, port, numeric_level, event_registry, shared_state, token):
     logging.basicConfig(
         level=numeric_level,
         format="[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s",
     )
     log.info(f"listening on {host}:{port}")
-    app = make_app(event_registry, shared_state)
-    app.listen(address=host, port=port)
-    return app
+    app = make_app(event_registry, shared_state, token)
+    http_server = tornado.httpserver.HTTPServer(app)
+    http_server.listen(address=host, port=port)
+    return http_server
 
 
 def _confirm_exit(shared_state, loop):
@@ -187,13 +197,13 @@ def handle_signal(shared_state):
         signal.signal(signal.SIGINT, partial(sig_exit, shared_state=shared_state))
 
 
-def run(host, port, browser, local_directory, numeric_level):
+def run(host, port, browser, local_directory, numeric_level, token):
     # shared state:
     event_registry = EventRegistry()
     shared_state = SharedState()
 
     shared_state.set_local_directory(local_directory)
-    main(host, port, numeric_level, event_registry, shared_state)
+    main(host, port, numeric_level, event_registry, shared_state, token)
     if browser:
         webbrowser.open(f'http://{host}:{port}')
     loop = asyncio.get_event_loop()

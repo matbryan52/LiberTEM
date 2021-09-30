@@ -12,7 +12,6 @@ log = logging.getLogger(__name__)
 
 
 class ComTemplate(GeneratorHelper):
-
     short_name = "com"
     api = "create_com_analysis"
     temp = GeneratorHelper.temp_analysis
@@ -46,6 +45,12 @@ class ComTemplate(GeneratorHelper):
         for k in ['cx', 'cy']:
             params.append(f'{k}={self.params[k]}')
         params.append(f"mask_radius={self.params['r']}")
+        if self.params.get('flip_y', False):
+            params.append("flip_y=True")
+        if self.params.get('scan_rotation') is not None:
+            params.append(f"scan_rotation={self.params['scan_rotation']}")
+        if self.params.get('ri') is not None:
+            params.append(f"mask_radius_inner={self.params['ri']}")
         return ', '.join(params)
 
     def get_plot(self):
@@ -90,6 +95,37 @@ def com_masks_factory(detector_y, detector_x, cy, cx, r):
             imageSizeX=detector_x,
             imageSizeY=detector_y,
         ) * disk_mask(),
+    ]
+
+
+def com_masks_generic(detector_y, detector_x, base_mask_factory):
+    """
+    Create a CoM mask stack with a generic selection mask factory
+
+    Parameters
+    ----------
+    detector_y : int
+        The detector height
+    detector_x : int
+        The detector width
+    base_mask_factory : () -> np.array
+        A factory function for creating the selection mask
+
+    Returns
+    -------
+    List[Function]
+        The mask stack as a list of factory functions
+    """
+    return [
+        base_mask_factory,
+        lambda: masks.gradient_y(
+            imageSizeX=detector_x,
+            imageSizeY=detector_y,
+        ) * base_mask_factory(),
+        lambda: masks.gradient_x(
+            imageSizeX=detector_x,
+            imageSizeY=detector_y,
+        ) * base_mask_factory(),
     ]
 
 
@@ -263,13 +299,29 @@ class COMAnalysis(BaseMasksAnalysis, id_="CENTER_OF_MASS"):
     def get_mask_factories(self):
         if self.dataset.shape.sig.dims != 2:
             raise ValueError("can only handle 2D signals currently")
-        return com_masks_factory(
-            detector_y=self.dataset.shape.sig[0],
-            detector_x=self.dataset.shape.sig[1],
-            cx=self.parameters['cx'],
-            cy=self.parameters['cy'],
-            r=self.parameters['r'],
-        )
+        if self.parameters.get('ri'):
+            # annular CoM:
+            return com_masks_generic(
+                detector_y=self.dataset.shape.sig[0],
+                detector_x=self.dataset.shape.sig[1],
+                base_mask_factory=lambda: masks.ring(
+                    imageSizeY=self.dataset.shape.sig[0],
+                    imageSizeX=self.dataset.shape.sig[1],
+                    centerY=self.parameters['cy'],
+                    centerX=self.parameters['cx'],
+                    radius=self.parameters['r'],
+                    radius_inner=self.parameters['ri'],
+                )
+            )
+        else:
+            # CoM with radius cut-off:
+            return com_masks_factory(
+                detector_y=self.dataset.shape.sig[0],
+                detector_x=self.dataset.shape.sig[1],
+                cx=self.parameters['cx'],
+                cy=self.parameters['cy'],
+                r=self.parameters['r'],
+            )
 
     def get_parameters(self, parameters):
         (detector_y, detector_x) = self.dataset.shape.sig
@@ -277,6 +329,7 @@ class COMAnalysis(BaseMasksAnalysis, id_="CENTER_OF_MASS"):
         cx = parameters.get('cx', detector_x / 2)
         cy = parameters.get('cy', detector_y / 2)
         r = parameters.get('r', float('inf'))
+        ri = parameters.get('ri', 0.0)
         scan_rotation = parameters.get('scan_rotation', 0.)
         flip_y = parameters.get('flip_y', False)
         use_sparse = parameters.get('use_sparse', False)
@@ -285,6 +338,7 @@ class COMAnalysis(BaseMasksAnalysis, id_="CENTER_OF_MASS"):
             'cx': cx,
             'cy': cy,
             'r': r,
+            'ri': ri,
             'scan_rotation': scan_rotation,
             'flip_y': flip_y,
             'use_sparse': use_sparse,
@@ -295,3 +349,21 @@ class COMAnalysis(BaseMasksAnalysis, id_="CENTER_OF_MASS"):
     @classmethod
     def get_template_helper(cls):
         return ComTemplate
+
+    def need_rerun(self, old_params, new_params):
+        """
+        Don't need to re-run UDF if only `flip_y` or `scan_rotation`
+        have changed.
+        """
+        ignore_keys = {"flip_y", "scan_rotation"}
+        old_without_ignored = {
+            k: v
+            for k, v in old_params.items()
+            if k not in ignore_keys
+        }
+        new_without_ignored = {
+            k: v
+            for k, v in new_params.items()
+            if k not in ignore_keys
+        }
+        return old_without_ignored != new_without_ignored

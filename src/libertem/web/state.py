@@ -94,11 +94,14 @@ class AnalysisState:
     def remove_results(self, uuid):
         del self.results[uuid]
 
-    def set_results(self, uuid, details, results, job_id):
+    def set_results(self, uuid, details, results, job_id, udf_results):
         """
         set results: create or update
         """
-        self.results[uuid] = (details, results, job_id)
+        self.results[uuid] = (copy.deepcopy(details), results, job_id, udf_results)
+
+    def have_results(self, uuid):
+        return uuid in self.results
 
     def get_results(self, uuid):
         return self.results[uuid]
@@ -110,7 +113,13 @@ class AnalysisState:
         return self.analyses[uuid]
 
     def serialize(self, uuid):
-        return self[uuid]
+        result = copy.copy(self[uuid])
+        result["jobs"] = [
+            job_id
+            for job_id in result["jobs"]
+            if not self.job_state.is_cancelled(job_id)
+        ]
+        return result
 
     def serialize_all(self):
         return [

@@ -67,14 +67,14 @@ class BakedRevisionBuilderSdist(sdist):
     def make_release_tree(self, base_dir, files):
         if not self.dry_run:
             write_baked_revision(base_dir)
-        sdist.make_release_tree(self, base_dir, files)
+        super().make_release_tree(base_dir, files)
 
 
 class BakedRevisionBuilderBuildPy(build_py):
     def run(self):
         if not self.dry_run:
             write_baked_revision(self.build_lib)
-        build_py.run(self)
+        super().run()
 
 
 def mkpath(path):
@@ -162,6 +162,7 @@ setup(
         'nbconvert',
         'autopep8',
         'empyre>=0.3.0',
+        'defusedxml',
     ],
     extras_require={
         'torch': 'torch',

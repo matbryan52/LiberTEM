@@ -1,18 +1,57 @@
 import * as React from "react";
 import { useState } from "react";
-import { useDispatch } from "react-redux";
-import { defaultDebounce } from "../../helpers";
+import { useDispatch, useSelector } from "react-redux";
+import { Checkbox, Dropdown, DropdownProps, Form, Header, Icon, Input, List, Modal, Popup } from "semantic-ui-react";
+import { defaultDebounce, getEnumValues } from "../../helpers";
 import ResultList from "../../job/components/ResultList";
-import { AnalysisTypes } from "../../messages";
-import { cbToRadius, inRectConstraint, keepOnCY } from "../../widgets/constraints";
+import { AnalysisTypes, CenterOfMassParams } from "../../messages";
+import { RootReducer } from "../../store";
+import { composeHandles } from "../../widgets/compose";
+import { cbToRadius, inRectConstraint, keepOnCY, riConstraint, roConstraints } from "../../widgets/constraints";
 import Disk from "../../widgets/Disk";
 import { DraggableHandle } from "../../widgets/DraggableHandle";
+import Ring from "../../widgets/Ring";
 import { HandleRenderFunction } from "../../widgets/types";
 import * as compoundAnalysisActions from "../actions";
+import { haveDisplayResult } from "../helpers";
 import { CompoundAnalysisProps } from "../types";
 import useDefaultFrameView from "./DefaultFrameView";
 import AnalysisLayoutTwoCol from "./layouts/AnalysisLayoutTwoCol";
 import Toolbar from "./Toolbar";
+
+export enum CoMMaskShapes {
+    DISK = "DISK",
+    RING = "RING",
+}
+
+export const MaskShapeMetadata: { [s: string]: { [s: string]: string } } = {
+    [CoMMaskShapes.DISK]: {
+        label: "Disk cut-off",
+    },
+    [CoMMaskShapes.RING]: {
+        label: "Annular CoM",
+    }
+}
+const maskShapeKeys = getEnumValues(CoMMaskShapes);
+const maskShapeOptions = maskShapeKeys.map(t => ({
+    text: MaskShapeMetadata[CoMMaskShapes[t]].label,
+    value: CoMMaskShapes[t],
+}));
+
+interface MaskShapeSelectorProps {
+    selectedShape: CoMMaskShapes,
+    handleChange: (e: React.SyntheticEvent, data: DropdownProps) => void,
+}
+
+const MaskShapeSelector: React.FC<MaskShapeSelectorProps> = ({ selectedShape, handleChange }) => (
+        <>
+            CoM mask shape:{' '}
+            <Dropdown inline options={maskShapeOptions}
+            value={selectedShape}
+            onChange={handleChange}
+            />
+        </>
+    )
 
 const CenterOfMassAnalysis: React.FC<CompoundAnalysisProps> = ({ compoundAnalysis, dataset }) => {
     const { shape } = dataset.params;
@@ -21,6 +60,10 @@ const CenterOfMassAnalysis: React.FC<CompoundAnalysisProps> = ({ compoundAnalysi
     const [cx, setCx] = useState(imageWidth / 2);
     const [cy, setCy] = useState(imageHeight / 2);
     const [r, setR] = useState(minLength / 4);
+    const [flip_y, setFlipY] = useState(false);
+    const [scan_rotation, setScanRotation] = useState("0.0");
+    const [ri, setRI] = useState(minLength / 8);
+    const [maskShape, setMaskShape] = useState(CoMMaskShapes.DISK)
 
     const dispatch = useDispatch();
 
@@ -29,13 +72,24 @@ const CenterOfMassAnalysis: React.FC<CompoundAnalysisProps> = ({ compoundAnalysi
         y: cy,
     }
 
+    const riHandle = {
+        x: cx - ri,
+        y: cy,
+    }
+
     const handleCenterChange = defaultDebounce((newCx: number, newCy: number) => {
         setCx(newCx);
         setCy(newCy);
     });
     const handleRChange = defaultDebounce(setR);
+    const handleRIChange = defaultDebounce(setRI);
 
-    const frameViewHandles: HandleRenderFunction = (handleDragStart, handleDrop) => (<>
+    let rConstraint = keepOnCY(cy);
+    if (maskShape === CoMMaskShapes.RING) {
+        rConstraint = roConstraints(riHandle.x, cy);
+    }
+
+    let frameViewHandles: HandleRenderFunction = (handleDragStart, handleDrop) => (<>
         <DraggableHandle x={cx} y={cy}
             imageWidth={imageWidth}
             onDragMove={handleCenterChange}
@@ -47,13 +101,32 @@ const CenterOfMassAnalysis: React.FC<CompoundAnalysisProps> = ({ compoundAnalysi
             onDragMove={cbToRadius(cx, cy, handleRChange)}
             parentOnDragStart={handleDragStart}
             parentOnDrop={handleDrop}
-            constraint={keepOnCY(cy)} />
+            constraint={rConstraint} />
     </>);
 
-    const frameViewWidgets = (
-        <Disk cx={cx} cy={cy} r={r}
-            imageWidth={imageWidth} imageHeight={imageHeight} />
-    )
+    let frameViewWidgets = (<></>);
+
+    if (maskShape === CoMMaskShapes.DISK) {
+        frameViewWidgets = (
+            <Disk cx={cx} cy={cy} r={r}
+                imageWidth={imageWidth} />
+        );
+    } else if(maskShape === CoMMaskShapes.RING) {
+        frameViewWidgets = (
+            <Ring cx={cx} cy={cy} ro={r} ri={ri}
+                imageWidth={imageWidth} />
+        );
+        frameViewHandles = composeHandles(frameViewHandles, (handleDragStart, handleDrop)  => (
+            <>
+                <DraggableHandle x={riHandle.x} y={riHandle.y}
+                    imageWidth={imageWidth}
+                    onDragMove={cbToRadius(cx, cy, handleRIChange)}
+                    parentOnDragStart={handleDragStart}
+                    parentOnDrop={handleDrop}
+                    constraint={riConstraint(rHandle.x, cy)} />
+            </>
+        ));
+    }
 
     const {
         frameViewTitle, frameModeSelector,
@@ -67,23 +140,145 @@ const CenterOfMassAnalysis: React.FC<CompoundAnalysisProps> = ({ compoundAnalysi
 
     const subtitle = <>{frameViewTitle} Disk: center=(x={cx.toFixed(2)}, y={cy.toFixed(2)}), r={r.toFixed(2)}</>;
 
+    let parsedScanRotation: number =  parseFloat(scan_rotation);
+    if (!parsedScanRotation) {
+        parsedScanRotation = 0.0;
+    }
+
     const runAnalysis = () => {
+        const parameters: CenterOfMassParams = {
+            shape: "com",
+            cx,
+            cy,
+            r,
+            flip_y,
+            scan_rotation: parsedScanRotation,
+        };
+        if (maskShape === CoMMaskShapes.RING) {
+            parameters.ri = ri;
+        }
         dispatch(compoundAnalysisActions.Actions.run(compoundAnalysis.compoundAnalysis, 1, {
             analysisType: AnalysisTypes.CENTER_OF_MASS,
-            parameters: {
-                shape: "com",
-                cx,
-                cy,
-                r
-            }
+            parameters,
         }));
     };
 
+    const analyses = useSelector((state: RootReducer) => state.analyses)
+    const jobs = useSelector((state: RootReducer) => state.jobs)
+
+    const haveResult = haveDisplayResult(
+        compoundAnalysis,
+        analyses,
+        jobs,
+        [1],
+    );
+
+    // NOTE: haveResult is not a dependency here, as we don't want to re-run directly
+    // after the results have become available.
+    React.useEffect(() => {
+        if (haveResult) {
+            runAnalysis();
+        }
+    }, [flip_y, scan_rotation]);
+
     const toolbar = <Toolbar compoundAnalysis={compoundAnalysis} onApply={runAnalysis} busyIdxs={[1]} />
+
+    const updateFlipY = (e: React.ChangeEvent<HTMLInputElement>, { checked }: { checked: boolean }) => {
+        setFlipY(checked);
+    };
+
+    const updateScanRotation = (e: React.ChangeEvent<HTMLInputElement>, { value }: { value: string }) => {
+        if (value === "-") {
+            setScanRotation("-");
+        }
+        setScanRotation(value);
+    };
+
+    // TODO: debounce parameters
+    const comParams = (
+        <>
+            <Header>
+                <Modal trigger={
+                    <Header.Content>
+                        Parameters
+                        {' '}
+                        <Icon name="info circle" size="small" link />
+                    </Header.Content>
+                }>
+                    <Popup.Header>CoM / first moment parameters</Popup.Header>
+                    <Popup.Content>
+                        <Header>CoM mask shape</Header>
+                        <p>
+                            Select a shape that will be used to mask out the data:
+                        </p>
+                        <ul>
+                            <li><em>Annular CoM</em>: calculate the center of mass in a selected ring</li>
+                            <li><em>Disk cut-off</em>: calculate the center of mass in a selected disk</li>
+                        </ul>
+                        <Header>Flip in y direction</Header>
+                        <p>
+                            Flip the Y coordinate. Some detectors, for example Quantum
+                            Detectors Merlin, may have pixel (0, 0) at the lower
+                            left corner. This has to be corrected to get the sign of
+                            the y shift as well as curl and divergence right.
+                        </p>
+                        <Header>Rotation between scan and detector</Header>
+                        <p>
+                            The optics of an electron microscope can rotate the
+                            image. Furthermore, scan generators may allow
+                            scanning in arbitrary directions. This means that
+                            the x and y coordinates of the detector image are
+                            usually not parallel to the x and y scan
+                            coordinates. For interpretation of center of mass
+                            shifts, however, the shift vector in detector
+                            coordinates has to be put in relation to the
+                            position on the sample. This parameter can be used
+                            to rotate the detector coordinates to match the scan
+                            coordinate system. A positive value rotates the
+                            displacement vector clock-wise. That means if the
+                            detector seems rotated to the right relative to the
+                            scan, this value should be negative to counteract
+                            this rotation.
+                        </p>
+                        <p>
+                            Use either the numeric input or the slider to adjust
+                            the rotation angle.
+                        </p>
+                    </Popup.Content>
+                </Modal>
+            </Header>
+            <Form>
+                <List relaxed="very">
+                    <List.Item>
+                        <List.Content>
+                            <MaskShapeSelector selectedShape={maskShape} handleChange={(e, data) => {
+                                setMaskShape(data.value as CoMMaskShapes)
+                            }} />
+                        </List.Content>
+                    </List.Item>
+                    <List.Item>
+                        <List.Content>
+                            <Form.Field control={Checkbox} label="Flip in y direction" checked={flip_y} onChange={updateFlipY} />
+                        </List.Content>
+                    </List.Item>
+                    <List.Item>
+                        <List.Content>
+                            <Form.Field type="number" control={Input} label="Rotation between scan and detector (deg)" value={scan_rotation} onChange={updateScanRotation} />
+                            <Form.Field type="range" min="-180" max="180" step="0.1" control={Input} value={scan_rotation} onChange={updateScanRotation} />
+                        </List.Content>
+                    </List.Item>
+                </List>
+            </Form>
+        </>
+    );
+
+    if(false) {
+        setMaskShape(CoMMaskShapes.DISK);
+    }
 
     return (
         <AnalysisLayoutTwoCol
-            title="COM analysis" subtitle={subtitle}
+            title="CoM / first moment analysis" subtitle={subtitle}
             left={<>
                 <ResultList
                     extraHandles={frameViewHandles} extraWidgets={frameViewWidgets}
@@ -101,6 +296,7 @@ const CenterOfMassAnalysis: React.FC<CompoundAnalysisProps> = ({ compoundAnalysi
                 />
             </>}
             toolbar={toolbar}
+            params={comParams}
         />
     );
 }
