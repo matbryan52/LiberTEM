@@ -6,7 +6,7 @@ import numpy as np
 
 from libertem.common import Shape
 from libertem.web.messages import MessageConverter
-from .base import DataSet, DataSetException, DataSetMeta, BasePartition
+from .base import DataSet, DataSetException, DataSetMeta, BasePartition, IOBackend
 from .raw import RawFile, RawFileSet
 
 
@@ -52,7 +52,7 @@ class EMPADDatasetParams(MessageConverter):
             "items": {"type": "number", "minimum": 1},
             "minItems": 2,
             "maxItems": 2
-            },
+        },
         "sig_shape": {
             "type": "array",
             "items": {"type": "number", "minimum": 1},
@@ -60,6 +60,9 @@ class EMPADDatasetParams(MessageConverter):
             "maxItems": 2
         },
         "sync_offset": {"type": "number"},
+        "io_backend": {
+            "enum": IOBackend.get_supported(),
+        },
       },
       "required": ["type", "path"]
     }
@@ -240,13 +243,15 @@ class EMPADDataSet(DataSet):
                 end_idx=self._image_count,
                 sig_shape=self.shape.sig,
                 native_dtype=self._meta.raw_dtype,
+                frame_footer=2*128*4,
             )
         ])
 
     def check_valid(self):
         try:
             fileset = self._get_fileset()
-            with fileset:
+            backend = self.get_io_backend().get_impl()
+            with backend.open_files(fileset):
                 return True
         except (OSError, ValueError) as e:
             raise DataSetException("invalid dataset: %s" % e)
@@ -257,14 +262,6 @@ class EMPADDataSet(DataSet):
             "shape": tuple(self.shape),
             "sync_offset": self._sync_offset,
         }
-
-    def get_num_partitions(self):
-        """
-        returns the number of partitions the dataset should be split into
-        """
-        # let's try to aim for 1024MB per partition
-        res = max(self._cores, self._filesize // (1024*1024*1024))
-        return res
 
     def get_partitions(self):
         fileset = self._get_fileset()

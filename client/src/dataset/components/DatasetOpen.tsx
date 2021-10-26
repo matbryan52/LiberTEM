@@ -145,6 +145,8 @@ const DatasetOpen = () => {
         </Segment>
     );
 
+    const datasetTypeInfo = useSelector((state: RootReducer) => state.config.datasetTypes[datasetType])
+
     const commonParams = {
         path: openState.formPath,
         onSubmit: (params: DatasetFormParams) => {
@@ -158,6 +160,7 @@ const DatasetOpen = () => {
             setReset(true);
             setDatasetType(getDefaultDSType(true, openState));
         },
+        datasetTypeInfo,
     }
 
     switch (datasetType) {

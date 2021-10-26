@@ -3,13 +3,16 @@ import typing
 import numpy as np
 
 from libertem.io.utils import get_partition_shape
-from libertem.io.dataset.base import DataSetException
+from libertem.io.dataset.base import DataSetException, MMapBackend
 from libertem.web.messageconverter import MessageConverter
 from libertem.corrections.corrset import CorrectionSet
 from .partition import BasePartition
 
 
 class DataSet:
+    # The default partition size in bytes
+    MAX_PARTITION_SIZE = 512*1024*1024
+
     def __init__(self, io_backend=None):
         self._cores = 1
         self._sync_offset = 0
@@ -60,9 +63,17 @@ class DataSet:
 
     def get_num_partitions(self):
         """
-        Returns the number of partitions the dataset should be split into
+        Returns the number of partitions the dataset should be split into.
+
+        The default implementation sizes partition such that they
+        fit into 512MB of float data in memory, regardless of their
+        native dtype. At least :code:`self._cores` partitions
+        are created.
         """
-        raise NotImplementedError()
+        partition_size_float_px = self.MAX_PARTITION_SIZE // 4
+        dataset_size_px = np.prod(self.shape, dtype=np.int64)
+        num = max(self._cores, dataset_size_px // partition_size_float_px)
+        return num
 
     def get_slices(self):
         """
@@ -197,7 +208,25 @@ class DataSet:
     def get_cache_key(self):
         raise NotImplementedError()
 
+    @classmethod
+    def get_default_io_backend(cls):
+        import platform
+        if platform.system() == "Windows":
+            from libertem.io.dataset.base import BufferedBackend
+            return BufferedBackend()
+        return MMapBackend()
+
+    @classmethod
+    def get_supported_io_backends(cls) -> typing.List[str]:
+        """
+        Get the supported I/O backends as list of their IDs. Some DataSet
+        implementations with a custom backend may return an empty list here.
+        """
+        return ["mmap", "buffered", "direct"]
+
     def get_io_backend(self):
+        if self._io_backend is None:
+            return self.get_default_io_backend()
         return self._io_backend
 
     def get_correction_data(self):

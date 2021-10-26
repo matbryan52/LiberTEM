@@ -1,4 +1,5 @@
 import os
+import typing
 import logging
 import warnings
 
@@ -6,12 +7,23 @@ from ncempy.io.dm import fileDM
 import numpy as np
 
 from libertem.common import Shape
+from libertem.io.dataset.base.file import OffsetsSizes
+from libertem.web.messageconverter import MessageConverter
 from .base import (
-    DataSet, FileSet, BasePartition, DataSetException, DataSetMeta,
-    LocalFile,
+    DataSet, FileSet, BasePartition, DataSetException, DataSetMeta, File,
 )
 
 log = logging.getLogger(__name__)
+
+
+class DMDatasetParams(MessageConverter):
+    SCHEMA: typing.Dict = {}
+
+    def convert_from_python(self, raw_data):
+        return super().convert_from_python(raw_data)
+
+    def convert_to_python(self, raw_data):
+        return super().convert_to_python(raw_data)
 
 
 def _get_metadata(path):
@@ -26,9 +38,10 @@ def _get_metadata(path):
     }
 
 
-class StackedDMFile(LocalFile):
-    def _mmap_to_array(self, raw_mmap, start, stop):
-        res = np.frombuffer(raw_mmap, dtype="uint8")
+class StackedDMFile(File):
+    def get_array_from_memview(self, mem: memoryview, slicing: OffsetsSizes):
+        mem = mem[slicing.file_offset:-slicing.skip_end]
+        res = np.frombuffer(mem, dtype="uint8")
         itemsize = np.dtype(self._native_dtype).itemsize
         sigsize = int(np.prod(self._sig_shape, dtype=np.int64))
         cutoff = 0
@@ -38,7 +51,7 @@ class StackedDMFile(LocalFile):
         res = res[:cutoff]
         return res.view(dtype=self._native_dtype).reshape(
             (self.num_frames, -1)
-        )[:, start:stop]
+        )[:, slicing.frame_offset:slicing.frame_offset + slicing.frame_size]
 
 
 class DMFileSet(FileSet):
@@ -228,6 +241,10 @@ class DMDataSet(DataSet):
         return {"dm3", "dm4"}
 
     @classmethod
+    def get_msg_converter(cls) -> typing.Type[MessageConverter]:
+        return DMDatasetParams
+
+    @classmethod
     def detect_params(cls, path, executor):
         # FIXME: this doesn't really make sense for file series
         pl = path.lower()
@@ -255,14 +272,6 @@ class DMDataSet(DataSet):
             return True
         except OSError as e:
             raise DataSetException("invalid dataset: %s" % e)
-
-    def get_num_partitions(self):
-        """
-        returns the number of partitions the dataset should be split into
-        """
-        # let's try to aim for 512MB per partition
-        res = max(self._cores, self._filesize // (512*1024*1024))
-        return res
 
     def get_partitions(self):
         for part_slice, start, stop in self.get_slices():

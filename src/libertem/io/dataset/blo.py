@@ -6,7 +6,7 @@ import numpy as np
 from libertem.common import Shape
 from .base import (
     DataSet, DataSetException, DataSetMeta,
-    BasePartition, FileSet, LocalFile,
+    BasePartition, FileSet, File, IOBackend,
 )
 from libertem.web.messages import MessageConverter
 
@@ -35,6 +35,9 @@ class BLODatasetParams(MessageConverter):
             "maxItems": 2
         },
         "sync_offset": {"type": "number"},
+        "io_backend": {
+            "enum": IOBackend.get_supported(),
+        },
       },
       "required": ["type", "path"],
     }
@@ -234,19 +237,9 @@ class BloDataSet(DataSet):
             "sync_offset": self._sync_offset,
         }
 
-    def get_num_partitions(self):
-        """
-        returns the number of partitions the dataset should be split into
-        """
-        # let's try to aim for 512MB (converted float data) per partition
-        partition_size_px = 512 * 1024 * 1024 // 4
-        total_size_px = np.prod(self.shape, dtype=np.int64)
-        res = max(self._cores, total_size_px // partition_size_px)
-        return res
-
     def _get_fileset(self):
         return BloFileSet([
-            LocalFile(
+            File(
                 path=self._path,
                 start_idx=0,
                 end_idx=self._image_count,

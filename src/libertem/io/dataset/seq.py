@@ -40,7 +40,7 @@ from libertem.common import Shape
 from libertem.web.messages import MessageConverter
 from libertem.io.dataset.base import (
     FileSet, DataSet, BasePartition, DataSetMeta, DataSetException,
-    LocalFile,
+    File, IOBackend,
 )
 from libertem.corrections import CorrectionSet
 
@@ -389,6 +389,9 @@ class SEQDatasetParams(MessageConverter):
                 "maxItems": 2
             },
             "sync_offset": {"type": "number"},
+            "io_backend": {
+                "enum": IOBackend.get_supported(),
+            }
         },
         "required": ["type", "path", "nav_shape"],
     }
@@ -456,6 +459,17 @@ class SEQDataSet(DataSet):
                  sig_shape: Tuple[int] = None, sync_offset: int = 0, io_backend=None):
         super().__init__(io_backend=io_backend)
         self._path = path
+        # There might be '.seq.seq' and '.seq' in the wild
+        # See https://github.com/LiberTEM/LiberTEM/issues/1120
+        # We first try if '.seq.seq' matches, then '.seq'
+        name, ext = os.path.splitext(path)
+        name2, ext2 = os.path.splitext(name)
+        if ext.lower() == '.seq' and ext2.lower() == '.seq':
+            self._basename = name2
+        elif ext.lower() == '.seq':
+            self._basename = name
+        else:
+            self._basename = path
         self._nav_shape = tuple(nav_shape) if nav_shape else nav_shape
         self._sig_shape = tuple(sig_shape) if sig_shape else sig_shape
         self._sync_offset = sync_offset
@@ -524,15 +538,17 @@ class SEQDataSet(DataSet):
         data_dict = mrcReader(path)
         return np.squeeze(data_dict['data'])
 
-    def _load_xml_from_file(self, path):
-        if not os.path.exists(path + ".Config.Metadata.xml"):
+    def _load_xml_from_file(self):
+        xml_path = self._basename + ".seq.Config.Metadata.xml"
+        meta_path = self._basename + ".seq.metadata"
+        if not os.path.exists(xml_path):
             return None
-        if not os.path.exists(path + ".metadata"):
+        if not os.path.exists(meta_path):
             return None
         else:
-            tree = ET.parse(path + ".Config.Metadata.xml")
+            tree = ET.parse(xml_path)
             root = tree.getroot()
-            with open(path + ".metadata", mode="rb") as file:
+            with open(meta_path, mode="rb") as file:
                 met = file.read()
             metdata_keys = ['DEMetadataSize', 'DEMetadataVersion', 'UnbinnedFrameSizeX',
                             'UnbinnedFrameSizeY', 'OffsetX', 'OffsetY', 'HardwareBinning',
@@ -542,9 +558,9 @@ class SEQDataSet(DataSet):
             return xml_processing(root, metadata)
 
     def _maybe_load_dark_gain(self):
-        self._dark = self._maybe_load_mrc(self._path + ".dark.mrc")
-        self._gain = self._maybe_load_mrc(self._path + ".gain.mrc")
-        self._excluded_pixels = self._load_xml_from_file(path=self._path)
+        self._dark = self._maybe_load_mrc(self._basename + ".seq.dark.mrc")
+        self._gain = self._maybe_load_mrc(self._basename + ".seq.gain.mrc")
+        self._excluded_pixels = self._load_xml_from_file()
 
     def get_correction_data(self):
         return CorrectionSet(
@@ -625,7 +641,7 @@ class SEQDataSet(DataSet):
 
     def _get_fileset(self):
         return SEQFileSet(files=[
-            LocalFile(
+            File(
                 path=self._path,
                 start_idx=0,
                 end_idx=self._image_count,
@@ -651,13 +667,6 @@ class SEQDataSet(DataSet):
             "shape": self.shape,
             "sync_offset": self._sync_offset,
         }
-
-    def get_num_partitions(self):
-        """
-        returns the number of partitions the dataset should be split into
-        """
-        res = max(self._cores, self._filesize // (512 * 1024 * 1024))
-        return res
 
     def get_partitions(self):
         fileset = self._get_fileset()

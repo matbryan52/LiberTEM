@@ -178,6 +178,10 @@ class SERDataSet(DataSet):
         return {"ser"}
 
     @classmethod
+    def get_supported_io_backends(self):
+        return []
+
+    @classmethod
     def detect_params(cls, path, executor):
         if path.lower().endswith(".ser"):
             ds = cls(path)
@@ -220,14 +224,6 @@ class SERDataSet(DataSet):
             "shape": tuple(self.shape),
             "sync_offset": self._sync_offset,
         }
-
-    def get_num_partitions(self):
-        """
-        returns the number of partitions the dataset should be split into
-        """
-        # let's try to aim for 512MB per partition
-        res = max(self._cores, self._filesize // (64*1024*1024))
-        return res
 
     def _get_fileset(self):
         assert self._num_frames is not None

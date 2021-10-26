@@ -1,13 +1,12 @@
 import os
 import warnings
-import mmap
 import numpy as np
 
 from libertem.common import Shape
 from libertem.web.messages import MessageConverter
 from .base import (
     DataSet, DataSetException, DataSetMeta,
-    BasePartition, LocalFile, FileSet,
+    BasePartition, File, FileSet, DirectBackend, IOBackend,
 )
 
 
@@ -34,8 +33,8 @@ class RAWDatasetParams(MessageConverter):
                 "maxItems": 2
             },
             "sync_offset": {"type": "number"},
-            "enable_direct": {
-                "type": "boolean"
+            "io_backend": {
+                "enum": IOBackend.get_supported(),
             },
         },
         "required": ["type", "path", "nav_shape", "sig_shape", "dtype"]
@@ -44,36 +43,15 @@ class RAWDatasetParams(MessageConverter):
     def convert_to_python(self, raw_data):
         data = {
             k: raw_data[k]
-            for k in ["path", "dtype", "nav_shape", "sig_shape", "enable_direct"]
+            for k in ["path", "dtype", "nav_shape", "sig_shape"]
         }
         if "sync_offset" in raw_data:
             data["sync_offset"] = raw_data["sync_offset"]
         return data
 
 
-class RawFile(LocalFile):
-    def open(self):
-        f = open(self._path, "rb")
-        self._file = f
-        self._raw_mmap = mmap.mmap(
-            fileno=f.fileno(),
-            length=0,
-            offset=0,
-            access=mmap.ACCESS_READ,
-        )
-        # TODO: self._raw_mmap.madvise(mmap.MADV_HUGEPAGE) - benchmark this!
-        itemsize = np.dtype(self._native_dtype).itemsize
-        assert self._frame_header % itemsize == 0
-        assert self._frame_footer % itemsize == 0
-        start = self._frame_header // itemsize
-        stop = start + int(np.prod(self._sig_shape))
-        if self._raw_mmap.size() % int(np.prod(self._sig_shape)) != 0:
-            new_mmap_size = self.num_frames * (
-                itemsize * np.prod(self.sig_shape, dtype=np.int64)
-            )
-            skip_partial_frame = self._raw_mmap.size() - new_mmap_size
-            self._raw_mmap = memoryview(self._raw_mmap)[:-skip_partial_frame]
-        self._mmap = self._mmap_to_array(self._raw_mmap, start, stop)
+class RawFile(File):
+    pass
 
 
 class RawFileSet(FileSet):
@@ -120,6 +98,15 @@ class RawFileDataSet(DataSet):
     def __init__(self, path, dtype, scan_size=None, detector_size=None, enable_direct=False,
                  detector_size_raw=None, crop_detector_to=None, tileshape=None,
                  nav_shape=None, sig_shape=None, sync_offset=0, io_backend=None):
+        if enable_direct and io_backend is not None:
+            raise ValueError("can't specify io_backend and enable_direct at the same time")
+        if enable_direct:
+            warnings.warn(
+                "enable_direct is deprecated; pass "
+                "`io_backend=DirectBackend()` instead",
+                FutureWarning
+            )
+            io_backend = DirectBackend()
         super().__init__(io_backend=io_backend)
         # handle backwards-compatability:
         if tileshape is not None:
@@ -167,12 +154,6 @@ class RawFileDataSet(DataSet):
         self._path = path
         self._sig_dims = len(self._sig_shape)
         self._dtype = dtype
-        if enable_direct:
-            warnings.warn(
-                "enable_direct is ignored for now, this may be re-added as a separate backend",
-                FutureWarning
-            )
-        self._enable_direct = enable_direct
         self._filesize = None
 
     def initialize(self, executor):
@@ -226,11 +207,10 @@ class RawFileDataSet(DataSet):
         ])
 
     def check_valid(self):
-        if self._enable_direct and not hasattr(os, 'O_DIRECT'):
-            raise DataSetException("LiberTEM currently only supports Direct I/O on Linux")
         try:
             fileset = self._get_fileset()
-            with fileset:
+            backend = self.get_io_backend().get_impl()
+            with backend.open_files(fileset):
                 return True
         except (OSError, ValueError) as e:
             raise DataSetException("invalid dataset: %s" % e)
@@ -244,16 +224,6 @@ class RawFileDataSet(DataSet):
             "dtype": str(self.dtype),
             "sync_offset": self._sync_offset,
         }
-
-    def get_num_partitions(self):
-        """
-        returns the number of partitions the dataset should be split into
-        """
-        # let's try to aim for 1024MB (converted float data) per partition
-        partition_size_px = 1024 * 1024 * 1024 // 4
-        total_size_px = np.prod(self.shape, dtype=np.int64)
-        res = max(self._cores, total_size_px // partition_size_px)
-        return res
 
     def get_partitions(self):
         fileset = self._get_fileset()

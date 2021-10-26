@@ -13,7 +13,9 @@ from libertem.udf.raw import PickUDF
 
 from libertem.analysis.raw import PickFrameAnalysis
 from libertem.io.dataset.raw import RAWDatasetParams, RawFileDataSet
-from libertem.io.dataset.base import TilingScheme, BufferedBackend, MMapBackend
+from libertem.io.dataset.base import (
+    TilingScheme, BufferedBackend, MMapBackend, DirectBackend,
+)
 from libertem.common import Shape
 from libertem.common.buffers import reshaped_view
 from libertem.udf.sumsigudf import SumSigUDF
@@ -28,7 +30,6 @@ def raw_dataset_8x8x8x8(lt_ctx, raw_data_8x8x8x8_path):
         nav_shape=(8, 8),
         sig_shape=(8, 8),
         dtype="float32",
-        enable_direct=False,
     )
     ds.set_num_cores(4)
     ds = ds.initialize(lt_ctx.executor)
@@ -255,7 +256,6 @@ def test_message_converter_direct():
         "dtype": "d",
         "nav_shape": [16, 16],
         "sig_shape": [8, 8],
-        "enable_direct": True,
         "sync_offset": 0,
     }
     converted = RAWDatasetParams().convert_to_python(src)
@@ -264,7 +264,6 @@ def test_message_converter_direct():
         "dtype": "d",
         "nav_shape": [16, 16],
         "sig_shape": [8, 8],
-        "enable_direct": True,
         "sync_offset": 0,
     }
 
@@ -315,9 +314,28 @@ def test_missing_sig_shape(lt_ctx, default_raw):
     assert e.match("missing 1 required argument: 'sig_shape'")
 
 
-@pytest.mark.skipif(not sys.platform.startswith('linux'),
-                    reason='Direct I/O only implemented on Linux')
+@pytest.mark.skipif(
+    sys.platform.startswith("darwin"),
+    reason="No support for direct I/O on Mac OS X"
+)
 def test_load_direct(lt_ctx, default_raw):
+    ds_direct = lt_ctx.load(
+        "raw",
+        path=default_raw._path,
+        nav_shape=(16, 16),
+        sig_shape=(16, 16),
+        dtype="float32",
+        io_backend=DirectBackend(),
+    )
+    analysis = lt_ctx.create_sum_analysis(dataset=ds_direct)
+    lt_ctx.run(analysis)
+
+
+@pytest.mark.skipif(
+    sys.platform.startswith("darwin"),
+    reason="No support for direct I/O on Mac OS X"
+)
+def test_load_legacy_direct(lt_ctx, default_raw):
     ds_direct = lt_ctx.load(
         "raw",
         path=default_raw._path,
@@ -330,19 +348,23 @@ def test_load_direct(lt_ctx, default_raw):
     lt_ctx.run(analysis)
 
 
-@pytest.mark.skipif(sys.platform.startswith('linux'),
-                    reason='No direct IO only on non-Linux')
-def test_direct_io_enabled_non_linux(lt_ctx, default_raw):
-    with pytest.raises(Exception) as e:
-        lt_ctx.load(
-            "raw",
-            path=default_raw._path,
-            nav_shape=(16, 16),
-            sig_shape=(16, 16),
-            dtype="float32",
-            enable_direct=True,
-        )
-    assert e.match("LiberTEM currently only supports Direct I/O on Linux")
+@pytest.mark.skipif(
+    sys.platform.startswith("darwin"),
+    reason="No support for direct I/O on Mac OS X"
+)
+def test_compare_direct_to_mmap(lt_ctx, default_raw, direct_raw):
+    y = random.choice(range(default_raw.shape.nav[0]))
+    x = random.choice(range(default_raw.shape.nav[1]))
+    mm_f0 = lt_ctx.run(lt_ctx.create_pick_analysis(
+        dataset=default_raw,
+        x=x, y=y,
+    )).intensity
+    buffered_f0 = lt_ctx.run(lt_ctx.create_pick_analysis(
+        dataset=direct_raw,
+        x=x, y=y,
+    )).intensity
+
+    assert np.allclose(mm_f0, buffered_f0)
 
 
 def test_big_endian(big_endian_raw, lt_ctx):
@@ -380,7 +402,6 @@ def test_positive_sync_offset(lt_ctx, raw_dataset_8x8x8x8, raw_data_8x8x8x8_path
         nav_shape=(8, 8),
         sig_shape=(8, 8),
         dtype="float32",
-        enable_direct=False,
         sync_offset=sync_offset,
         io_backend=io_backend,
     )
@@ -437,7 +458,6 @@ def test_negative_sync_offset(lt_ctx, raw_dataset_8x8x8x8, raw_data_8x8x8x8_path
         nav_shape=(8, 8),
         sig_shape=(8, 8),
         dtype="float32",
-        enable_direct=False,
         sync_offset=sync_offset,
         io_backend=io_backend,
     )
@@ -489,7 +509,6 @@ def test_missing_frames(lt_ctx, raw_data_8x8x8x8_path, io_backend):
         nav_shape=(10, 8),
         sig_shape=(8, 8),
         dtype="float32",
-        enable_direct=False,
         io_backend=io_backend,
     )
     ds.set_num_cores(4)
@@ -528,7 +547,6 @@ def test_too_many_frames(lt_ctx, raw_data_8x8x8x8_path, io_backend):
         nav_shape=(6, 8),
         sig_shape=(8, 8),
         dtype="float32",
-        enable_direct=False,
         io_backend=io_backend,
     )
     ds.set_num_cores(4)
@@ -558,7 +576,6 @@ def test_offset_smaller_than_image_count(lt_ctx, raw_data_8x8x8x8_path):
             nav_shape=(8, 8),
             sig_shape=(8, 8),
             dtype="float32",
-            enable_direct=False,
             sync_offset=sync_offset
         )
     assert e.match(
@@ -576,7 +593,6 @@ def test_offset_greater_than_image_count(lt_ctx, raw_data_8x8x8x8_path):
             nav_shape=(8, 8),
             sig_shape=(8, 8),
             dtype="float32",
-            enable_direct=False,
             sync_offset=sync_offset
         )
     assert e.match(
@@ -599,7 +615,6 @@ def test_reshape_nav(lt_ctx, raw_dataset_8x8x8x8, raw_data_8x8x8x8_path, io_back
         nav_shape=(64,),
         sig_shape=(8, 8),
         dtype="float32",
-        enable_direct=False,
         io_backend=io_backend,
     )
     result_with_1d_nav = lt_ctx.run_udf(dataset=ds_with_1d_nav, udf=udf)
@@ -614,7 +629,6 @@ def test_reshape_nav(lt_ctx, raw_dataset_8x8x8x8, raw_data_8x8x8x8_path, io_back
         nav_shape=(2, 4, 8),
         sig_shape=(8, 8),
         dtype="float32",
-        enable_direct=False,
     )
     result_with_3d_nav = lt_ctx.run_udf(dataset=ds_with_3d_nav, udf=udf)
     result_with_3d_nav = result_with_3d_nav['intensity'].raw_data
@@ -654,7 +668,16 @@ def test_different_sig_shape(lt_ctx, raw_data_8x8x8x8_path):
     assert ds._meta.image_count == 256
 
 
-def test_incorrect_sig_shape(lt_ctx, raw_data_8x8x8x8_path):
+@pytest.mark.parametrize(
+    "io_backend", (
+        BufferedBackend(),
+        MMapBackend(),
+    ),
+)
+def test_extra_data_at_the_end(lt_ctx, raw_data_8x8x8x8_path, io_backend):
+    """
+    If there is extra data at the end of the file, make sure it is cut off
+    """
     nav_shape = (8, 8)
     sig_shape = (3, 3)
 
@@ -664,6 +687,7 @@ def test_incorrect_sig_shape(lt_ctx, raw_data_8x8x8x8_path):
         nav_shape=nav_shape,
         sig_shape=sig_shape,
         dtype="float32",
+        io_backend=io_backend,
     )
 
     assert ds._meta.image_count == 455
