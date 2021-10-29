@@ -114,8 +114,8 @@ class PrecessionNotes(object):
         try:
             return self._scale_xy_value
         except AttributeError:
-            xscale = self.coordinates.groupby('xidx').ypos.diff().dropna().mean()
-            yscale = self.coordinates.groupby('yidx').xpos.diff().dropna().mean()
+            yscale = self.coordinates.groupby('xidx').ypos.diff().dropna().mean()
+            xscale = self.coordinates.groupby('yidx').xpos.diff().dropna().mean()
             if np.isnan(xscale) and np.isnan(yscale):
                 warnings.warn('Unexpected single frame scan? Cannot infer coordinate system')
                 xscale = yscale = 1.
