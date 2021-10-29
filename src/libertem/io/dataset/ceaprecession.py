@@ -134,10 +134,10 @@ class PrecessionNotes(object):
         return tuple(map(lambda x: x * unit_mapping[unit], iterable))
 
     def origin_xy(self, unit='nm'):
-        return self._convert_metres(self._origin_xy, unit)
+        return self._convert_metres(self._origin_xy, unit), unit
 
     def scale_xy(self, unit='nm'):
-        return self._convert_metres(self._scale_xy, unit)
+        return self._convert_metres(self._scale_xy, unit), unit
 
     @property
     def scan_bounds(self):
