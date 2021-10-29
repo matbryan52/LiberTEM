@@ -4,6 +4,7 @@ import pathlib
 import numpy as np
 import pandas as pd
 import mmap
+from scipy.interpolate import interp1d
 
 from libertem.web.messages import MessageConverter
 from libertem.common import Shape
@@ -64,6 +65,7 @@ class PrecessionNotes(object):
     def __init__(self, filepath):
         self.root = filepath.parent
         self.headers, self.coordinates = self.load_image_notes(filepath)
+        self.infer_grid_idcs()
 
     def __getitem__(self, idx):
         return self._fname_to_fpath(self.coordinates.fname.iloc[idx])
@@ -135,6 +137,31 @@ class PrecessionNotes(object):
 
         return odict
 
+    def infer_grid_idcs(self):
+        """
+        Assumes we have a cartesian scan.
+        Points will be labelled such that
+        xidx increases horizontally right and
+        yidx increases vertically down
+
+        Dataframe is re-sorted to ensure a C-ordering of files
+        This ensures any UDF results follow the correct
+        indexing as the FileSet is constructed directly
+        from the ordering of the coordinates dataframe
+        """
+        ny, nx = self.nav_shape
+        xmin, ymin, xmax, ymax = self.scan_bounds
+        sample_x_coords = np.linspace(xmin, xmax, num=nx, endpoint=True)
+        sample_y_coords = np.linspace(ymin, ymax, num=ny, endpoint=True)
+        xinterp = interp1d(sample_x_coords, np.arange(nx), kind='nearest')
+        yinterp = interp1d(sample_y_coords, np.arange(ny), kind='nearest')
+        self.coordinates['xidx'] = xinterp(self.coordinates.xpos.array).astype(int)
+        self.coordinates['yidx'] = yinterp(self.coordinates.ypos.array).astype(int)
+        self.coordinates = self.coordinates.sort_values(by=['yidx', 'xidx'], ignore_index=True)
+        if not (self.coordinates.groupby(['xidx', 'yidx']).size() == 1).all():
+            warnings.warn(('Assigning array indices to scan points found '
+                           'duplicate coordinates. Consider inspecting the '
+                           'coordinate dataframe.'))
 
 class CEAPrecessionDataset(RawFileDataSet):
     _bin_header_bytes = 10
