@@ -9,7 +9,7 @@ from scipy.interpolate import interp1d
 from libertem.web.messages import MessageConverter
 from libertem.common import Shape
 from .raw import RawFileDataSet
-from .base import DataSetMeta, LocalFile, FileSet, DataSetException
+from .base import DataSetMeta, File, FileSet, DataSetException
 
 
 """
@@ -346,7 +346,7 @@ class CEAPrecessionDataset(RawFileDataSet):
         return CEAPrecessionDatasetParams
 
 
-class CEAPrecessionFile(LocalFile):
+class CEAPrecessionFile(File):
     def open(self):
         f = open(self._path, "rb")
         self._file = f
@@ -359,6 +359,10 @@ class CEAPrecessionFile(LocalFile):
         # TODO: self._raw_mmap.madvise(mmap.MADV_HUGEPAGE) - benchmark this!
         self._raw_mmap = memoryview(self._raw_mmap)[self._frame_header:]
         self._mmap = self._mmap_to_array(self._raw_mmap)
+
+    def close(self):
+        self._raw_mmap = None
+        self._mmap = None
 
     def _mmap_to_array(self, raw_mmap):
         """
