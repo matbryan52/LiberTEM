@@ -172,6 +172,13 @@ class CEAPrecessionDataset(RawFileDataSet):
         )
         return self
 
+    @property
+    def precession_meta(self):
+        try:
+            return self._prec_ds_meta
+        except AttributeError:
+            warnings.warn('Must initialize dataset before metadata is available')
+
     @classmethod
     def _parse_meta(cls, path):
         assert path.suffix == '.txt'
