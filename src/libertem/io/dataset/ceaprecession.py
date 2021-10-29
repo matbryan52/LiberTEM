@@ -100,6 +100,51 @@ class PrecessionNotes(object):
     def exposure_time(self):
         return self.headers['extra'][2]  # 'Exposure time (s)'
 
+    @property
+    def _origin_xy(self):
+        try:
+            return self._origin_xy_value
+        except AttributeError:
+            topleft = self.coordinates.groupby(['xidx', 'yidx']).get_group((0, 0))
+            self._origin_xy_value = topleft.xpos.min(), topleft.ypos.min()
+            return self._origin_xy
+
+    @property
+    def _scale_xy(self):
+        try:
+            return self._scale_xy_value
+        except AttributeError:
+            xscale = self.coordinates.groupby('xidx').ypos.diff().dropna().mean()
+            yscale = self.coordinates.groupby('yidx').xpos.diff().dropna().mean()
+            if np.isnan(xscale) and np.isnan(yscale):
+                warnings.warn('Unexpected single frame scan? Cannot infer coordinate system')
+                xscale = yscale = 1.
+            elif np.isnan(yscale):
+                yscale = xscale
+            elif np.isnan(xscale):
+                xscale = yscale
+            self._scale_xy_value = xscale, yscale
+            return self._scale_xy
+
+    @staticmethod
+    def _convert_metres(iterable, unit='nm'):
+        unit_mapping = {'nm': 1e9, 'um': 1e6, 'μ': 1e6, 'a': 1e10, 'Å': 1e10}
+        if unit not in unit_mapping.keys():
+            raise ValueError(f'Unrecognized unit {unit}, accepted are {unit_mapping.keys()}')
+        return tuple(map(lambda x: x * unit_mapping[unit], iterable))
+
+    def origin_xy(self, unit='nm'):
+        return self._convert_metres(self._origin_xy, unit)
+
+    def scale_xy(self, unit='nm'):
+        return self._convert_metres(self._scale_xy, unit)
+
+    @property
+    def scan_bounds(self):
+        xmin, xmax = self.coordinates['xpos'].min(), self.coordinates['xpos'].max()
+        ymin, ymax = self.coordinates['ypos'].min(), self.coordinates['ypos'].max()
+        return xmin, ymin, xmax, ymax
+
     def load_image_notes(self, filepath):
         header_rows = 11
         dataframe = pd.read_csv(filepath, sep='\t', header=None,
