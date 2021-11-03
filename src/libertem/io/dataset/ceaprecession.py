@@ -196,12 +196,18 @@ class PrecessionNotes(object):
         """
         ny, nx = self.nav_shape
         xmin, ymin, xmax, ymax = self.scan_bounds
-        sample_x_coords = np.linspace(xmin, xmax, num=nx, endpoint=True)
-        sample_y_coords = np.linspace(ymin, ymax, num=ny, endpoint=True)
-        xinterp = interp1d(sample_x_coords, np.arange(nx), kind='nearest')
-        yinterp = interp1d(sample_y_coords, np.arange(ny), kind='nearest')
-        self.coordinates['xidx'] = xinterp(self.coordinates.xpos.array).astype(int)
-        self.coordinates['yidx'] = yinterp(self.coordinates.ypos.array).astype(int)
+        if nx > 1:
+            sample_x_coords = np.linspace(xmin, xmax, num=nx, endpoint=True)
+            xinterp = interp1d(sample_x_coords, np.arange(nx), kind='nearest')
+            self.coordinates['xidx'] = xinterp(self.coordinates.xpos.array).astype(int)
+        else:
+            self.coordinates['xidx'] = 0
+        if ny > 1:
+            sample_y_coords = np.linspace(ymin, ymax, num=ny, endpoint=True)
+            yinterp = interp1d(sample_y_coords, np.arange(ny), kind='nearest')
+            self.coordinates['yidx'] = yinterp(self.coordinates.ypos.array).astype(int)
+        else:
+            self.coordinates['yidx'] = 0
         self.coordinates = self.coordinates.sort_values(by=['yidx', 'xidx'], ignore_index=True)
         if not (self.coordinates.groupby(['xidx', 'yidx']).size() == 1).all():
             warnings.warn(('Assigning array indices to scan points found '
@@ -212,7 +218,7 @@ class CEAPrecessionDataset(RawFileDataSet):
     _bin_header_bytes = 10
 
     def __init__(self, path, dtype=np.int32, nav_shape=None, sig_shape=None,
-                io_backend=None, enable_direct=False, sync_offset=0,):
+                 io_backend=None, enable_direct=False, sync_offset=0,):
         super(RawFileDataSet, self).__init__(io_backend=io_backend)
 
         self._path = pathlib.Path(path)
@@ -300,7 +306,7 @@ class CEAPrecessionDataset(RawFileDataSet):
             CEAPrecessionFile(
                 path=f,
                 start_idx=fidx,
-                end_idx=fidx+1,
+                end_idx=fidx + 1,
                 sig_shape=self.shape.sig,
                 native_dtype=self._meta.raw_dtype,
                 frame_header=self._bin_header_bytes
