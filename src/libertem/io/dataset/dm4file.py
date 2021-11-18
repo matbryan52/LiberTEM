@@ -183,6 +183,7 @@ class DM4DataSet(DataSet):
         self._filesize = executor.run_function(self._get_filesize)
 
         self._nav_shape_product = int(prod(self._nav_shape))
+        self._image_count = self._nav_shape_product
         self._sync_offset_info = self.get_sync_offset_info()
         self._meta = DataSetMeta(
             shape=ds_shape,
