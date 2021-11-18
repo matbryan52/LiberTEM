@@ -309,7 +309,8 @@ class CEAPrecessionDataset(RawFileDataSet):
                 end_idx=fidx + 1,
                 sig_shape=self.shape.sig,
                 native_dtype=self._meta.raw_dtype,
-                frame_header=self._bin_header_bytes
+                frame_header=0,
+                file_header=self._bin_header_bytes
             )
             for fidx, f in enumerate(self._prec_ds_meta)])
 
