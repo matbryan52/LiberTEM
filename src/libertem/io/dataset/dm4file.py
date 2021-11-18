@@ -169,6 +169,8 @@ class DM4DataSet(DataSet):
             sig_shape=self._meta.shape.sig,
             native_dtype=self._meta.raw_dtype,
             file_header=0,
+            dataset_number=self._dataset_number,
+            transpose_signav=self._transpose_signav
         )
         return DMFileSet([f])
 
