@@ -37,10 +37,10 @@ class DM4MMapFile(MMapFile):
     def open(self):
         filepath = self.desc.path
         ds_num = self.desc._dataset_number
-        do_tranpose = self.desc._tranpose_signav
+        do_transpose = self.desc._transpose_signav
         self._mmap = get_memmap(filepath,
                                 dataset_number=ds_num,
-                                transpose_signav=do_tranpose)
+                                transpose_signav=do_transpose)
         self._arr = self._mmap
         return self
 
