@@ -12,7 +12,8 @@ from libertem.web.messageconverter import MessageConverter
 from .base import (
     DataSet, FileSet, BasePartition, DataSetException, DataSetMeta, File,
 )
-from libertem.io.dataset.base.backend_mmap import MMapFile, MMapBackend, MMapBackendImpl
+from libertem.io.dataset.base.backend_mmap import MMapFile, MMapBackend
+from libertem.io.dataset.memory import MemBackendImpl
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class DM4Backend(MMapBackend):
         return DM4BackendImpl()
 
 
-class DM4BackendImpl(MMapBackendImpl):
+class DM4BackendImpl(MemBackendImpl):
     FILE_CLS = DM4MMapFile
 
 
@@ -176,6 +177,9 @@ class DM4DataSet(DataSet):
 
     def _get_filesize(self):
         return os.stat(self._file).st_size
+
+    def get_io_backend(self):
+        return DM4Backend()
 
     def initialize(self, executor):
         ds_shape, raw_dtype = self._get_ds_info()
