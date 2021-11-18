@@ -320,7 +320,7 @@ class CEAPrecessionDataset(RawFileDataSet):
         try:
             fileset = self._get_fileset()
             for f in fileset:
-                with open(f, 'rb'):
+                with open(f.path, 'rb'):
                     pass
             return True
         except (OSError, ValueError) as e:
