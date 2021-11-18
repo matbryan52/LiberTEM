@@ -168,7 +168,7 @@ class DM4DataSet(DataSet):
             end_idx=self._nav_shape_product,
             sig_shape=self._meta.shape.sig,
             native_dtype=self._meta.raw_dtype,
-            file_header=None  # self._offsets[fn],
+            file_header=0,
         )
         return DMFileSet([f])
 
