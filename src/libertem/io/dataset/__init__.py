@@ -19,6 +19,7 @@ filetypes = {
     "dm": "libertem.io.dataset.dm.DMDataSet",
     "seq": "libertem.io.dataset.seq.SEQDataSet",
     "mrc": "libertem.io.dataset.mrc.MRCDataSet",
+    "dm4": "libertem.io.dataset.dm4file.DM4DataSet"
 }
 
 
