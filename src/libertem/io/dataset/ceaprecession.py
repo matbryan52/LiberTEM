@@ -354,48 +354,49 @@ class CEAPrecessionDataset(RawFileDataSet):
 
 
 class CEAPrecessionFile(File):
-    def open(self):
-        f = open(self._path, "rb")
-        self._file = f
-        self._raw_mmap = mmap.mmap(
-            fileno=f.fileno(),
-            length=0,
-            offset=0,
-            access=mmap.ACCESS_READ,
-        )
-        # TODO: self._raw_mmap.madvise(mmap.MADV_HUGEPAGE) - benchmark this!
-        self._raw_mmap = memoryview(self._raw_mmap)[self._frame_header:]
-        self._mmap = self._mmap_to_array(self._raw_mmap)
+    pass
+    # def open(self):
+    #     f = open(self._path, "rb")
+    #     self._file = f
+    #     self._raw_mmap = mmap.mmap(
+    #         fileno=f.fileno(),
+    #         length=0,
+    #         offset=0,
+    #         access=mmap.ACCESS_READ,
+    #     )
+    #     # TODO: self._raw_mmap.madvise(mmap.MADV_HUGEPAGE) - benchmark this!
+    #     self._raw_mmap = memoryview(self._raw_mmap)[self._frame_header:]
+    #     self._mmap = self._mmap_to_array(self._raw_mmap)
 
-    def close(self):
-        self._raw_mmap = None
-        self._mmap = None
+    # def close(self):
+    #     self._raw_mmap = None
+    #     self._mmap = None
 
-    def _mmap_to_array(self, raw_mmap):
-        """
-        Create an array from the raw memory map, stripping away
-        frame headers and footers
+    # def _mmap_to_array(self, raw_mmap):
+    #     """
+    #     Create an array from the raw memory map, stripping away
+    #     frame headers and footers
 
-        Parameters
-        ----------
+    #     Parameters
+    #     ----------
 
-        raw_mmap : np.memmap or memoryview
-            The raw memory map, with the file header already stripped away
+    #     raw_mmap : np.memmap or memoryview
+    #         The raw memory map, with the file header already stripped away
 
-        start : int
-            Number of items cut away at the start of each frame (frame_header // itemsize)
+    #     start : int
+    #         Number of items cut away at the start of each frame (frame_header // itemsize)
 
-        stop : int
-            Number of items per frame (something like start + np.prod(sig_shape))
-        """
-        return np.frombuffer(raw_mmap, dtype=self._native_dtype).reshape(self.num_frames, -1)
+    #     stop : int
+    #         Number of items per frame (something like start + np.prod(sig_shape))
+    #     """
+    #     return np.frombuffer(raw_mmap, dtype=self._native_dtype).reshape(self.num_frames, -1)
 
-    def __enter__(self):
-        self.open()
-        return self
+    # def __enter__(self):
+    #     self.open()
+    #     return self
 
-    def __exit__(self, *exc):
-        self.close()
+    # def __exit__(self, *exc):
+    #     self.close()
 
 
 class CEAPrecessionFileSet(FileSet):
