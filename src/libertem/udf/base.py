@@ -645,8 +645,25 @@ class UDFBase:
     def init_task_data(self) -> None:
         self.task_data = UDFData(self.get_task_data())
 
-    def init_result_buffers(self) -> None:
+    def init_result_buffers(self, executor=None) -> None:
+        """
+        Create the UDFData instance containing BufferWrappers
+        for results of this UDF. Same method used for
+        Dataset- and Partition-sized buffers.
+
+        The executor argument is provided on the main node
+        only to allow modification of Dataset-sized buffers
+        buffers into more specialized forms.
+
+        #TODO use another mechanism to distinguish between
+        dataset and parititon-sized buffers when initializing,
+        such that we can modify buffers in both cases.
+        """
         self.results = UDFData(self.get_result_buffers())
+        if executor is not None:
+            for name, buffer in self.results.items():
+                new_buffer = executor.modify_buffer_type(buffer)
+                self.results.set_buffer(name, new_buffer)
 
     def export_results(self) -> None:
         # .. versionadded:: 0.6.0.dev0
@@ -1749,7 +1766,7 @@ class UDFRunner:
 
         for udf in self._udfs:
             udf.set_meta(meta)
-            udf.init_result_buffers()
+            udf.init_result_buffers(executor=executor)
             udf.allocate_for_full(dataset, roi)
 
             if isinstance(udf, UDFPreprocessMixin):
