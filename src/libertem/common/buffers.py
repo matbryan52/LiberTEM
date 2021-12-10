@@ -569,6 +569,34 @@ class BufferWrapper:
             self._kind, self._dtype, self._extra_shape
         )
 
+    def set_buffer(self, buf, is_global=True):
+        """
+        Set the underlying buffer to an existing numpy array.
+        Raises exception if buffer is already allocated
+        """
+        assert self._data is None
+        self.reset_buffer(buf, is_global=is_global)
+
+    def reset_buffer(self, buf, is_global=True):
+        """
+        Set the underlying buffer to an existing numpy array,
+        even if the buffer is already allocated
+
+        If is_global is True, the shape must match with the shape of nav or sig
+        of the dataset, plus extra_shape, as determined by the `kind` and
+        `extra_shape` constructor arguments.
+        """
+        assert buf.dtype == self._dtype
+        extra = self._extra_shape
+        shape = (-1,)
+        if extra and extra != (1,):
+            shape = shape + extra
+        if buf.shape != shape:
+            self._data = buf.reshape(shape)
+        else:
+            self._data = buf
+        self._data_coords_global = is_global
+
 
 class PlaceholderBufferWrapper(BufferWrapper):
     """
@@ -648,23 +676,6 @@ class AuxBufferWrapper(BufferWrapper):
 
     def get_view_for_dataset(self, dataset):
         return self._data[self._roi]
-
-    def set_buffer(self, buf, is_global=True):
-        """
-        Set the underlying buffer to an existing numpy array.
-
-        If is_global is True, the shape must match with the shape of nav or sig
-        of the dataset, plus extra_shape, as determined by the `kind` and
-        `extra_shape` constructor arguments.
-        """
-        assert self._data is None
-        assert buf.dtype == self._dtype
-        extra = self._extra_shape
-        shape = (-1,)
-        if extra and extra != (1,):
-            shape = shape + extra
-        self._data = buf.reshape(shape)
-        self._data_coords_global = is_global
 
     def __repr__(self):
         return "<AuxBufferWrapper kind={} dtype={} extra_shape={}>".format(
