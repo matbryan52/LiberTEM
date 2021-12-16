@@ -5,9 +5,20 @@ from libertem.executor.delayed import DelayedJobExecutor
 from libertem.udf.sum import SumUDF  # No CUDA support in this one
 
 
+from libertem.executor.dask import DaskJobExecutor, cluster_spec
+
+
 if __name__ == '__main__':
     # Make a LiberTEM Dask cluster and set it as default for Dask
-    ctx = Context.make_with("dask-make-default")
+    devices = {
+        "cpus": list(range(2)),
+        "cudas": [0],
+        "has_cupy": True,
+    }
+    spec = cluster_spec(**devices)
+    exec = DaskJobExecutor.make_local(spec)
+
+    ctx = Context(executor=exec)
     del_ctx = Context(executor=DelayedJobExecutor())
 
     ds = ctx.load('memory', data=np.zeros((32, 32, 64, 64)))
