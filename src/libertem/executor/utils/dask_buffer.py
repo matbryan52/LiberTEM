@@ -20,7 +20,7 @@ def dask_cupy_zeros(lib, shape, chunks=None, **kwargs):
     block_array = np.empty(block_shape, dtype=object)
     flat_block_view = block_array.ravel()
     for idx, block in enumerate(target_structure.blocks.ravel()):
-        cp_block = cp.zeros_like(block)
+        cp_block = cp.zeros(block.shape, dtype=block.dtype)
         flat_block_view[idx] = cp_block
     return da.block(block_array.tolist())
 
