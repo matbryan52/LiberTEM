@@ -7,6 +7,24 @@ from ...common.buffers import BufferWrapper
 from .dask_inplace import DaskInplaceWrapper
 
 
+def dask_cupy_zeros(lib, shape, chunks=None, **kwargs):
+    """
+    Rely on dask to make correct block structure
+    Recreate as cupy arrays rather than map_blocks
+    to avoid an initial transfer from host to device
+    of all the zeros arrays
+    """
+    cp = lib
+    target_structure = da.zeros(shape, chunks=chunks, **kwargs)
+    block_shape = target_structure.blocks.shape
+    block_array = np.empty(block_shape, dtype=object)
+    flat_block_view = block_array.ravel()
+    for idx, block in enumerate(target_structure.blocks.ravel()):
+        cp_block = cp.zeros_like(block)
+        flat_block_view[idx] = cp_block
+    return da.block(block_array.tolist())
+
+
 class DaskBufferWrapper(BufferWrapper):
     @classmethod
     def from_buffer(cls, buffer: BufferWrapper):
@@ -68,7 +86,13 @@ class DaskBufferWrapper(BufferWrapper):
             _buf_chunking = self._shape
         else:
             raise NotImplementedError('Unrecognized buffer kind')
-        self._data = da.zeros(self._shape, dtype=self._dtype, chunks=_buf_chunking)
+        # This is an ugly hack to verify we have cupy as the backend!
+        # As far as I can see there is no way to access this information
+        # from the buffer, though it exists as self._backend on UDFBase
+        if self._where == 'device' and lib is not None and lib.__name__ == 'cupy':
+            self._data = dask_cupy_zeros(lib, self._shape, dtype=self._dtype, chunks=_buf_chunking)
+        else:
+            self._data = da.zeros(self._shape, dtype=self._dtype, chunks=_buf_chunking)
 
     @property
     def data(self):
