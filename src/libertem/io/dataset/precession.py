@@ -188,8 +188,8 @@ class PrecessionNotes:
 class PrecessionDataSet(RawFileGroupDataSet):
     _bin_header_bytes = 10
 
-    def __init__(self, notes_path, sync_offset=0, io_backend=None):
-        prec_ds_meta = self._parse_meta(notes_path)
+    def __init__(self, *, path, sync_offset=0, io_backend=None):
+        prec_ds_meta = self._parse_meta(path)
         nav_shape = prec_ds_meta.nav_shape
         sig_shape = self._infer_sig_shape(prec_ds_meta[0])
         paths = prec_ds_meta.paths
