@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d
 
 from libertem.web.messages import MessageConverter
 from .raw_group import RawFileGroupDataSet
-from .base import IOBackend
+from .base import IOBackend, DataSetException
 
 
 class PrecessionDatasetParams(MessageConverter):
@@ -203,8 +203,12 @@ class PrecessionDataSet(RawFileGroupDataSet):
 
     @classmethod
     def _parse_meta(cls, path):
-        assert path.suffix == '.txt'
-        return PrecessionNotes(path)
+        try:
+            path = pathlib.Path(path)
+            assert path.suffix == '.txt'
+            return PrecessionNotes(path)
+        except (AssertionError, ValueError, TypeError):
+            raise DataSetException(f'Unable to interpret input path {path} as Notes.txt')
 
     @classmethod
     def _infer_sig_shape(self, binpath):
