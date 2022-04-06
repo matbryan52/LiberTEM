@@ -197,7 +197,7 @@ class PrecessionDataSet(RawFileGroupDataSet):
                          dtype=np.int32,
                          nav_shape=nav_shape,
                          sig_shape=sig_shape,
-                         file_heade=self._bin_header_bytes,
+                         file_header=self._bin_header_bytes,
                          sync_offset=sync_offset,
                          io_backend=io_backend)
 
