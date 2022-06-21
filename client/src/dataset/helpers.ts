@@ -27,7 +27,7 @@ export const adjustShapeWithBounds = (shape: string, shapeType: "nav"|"sig"): st
         if (parsedShape.length === minLength) {
             adjustedShape = [...parsedShape];
         } else if (parsedShape.length < minLength) {
-            adjustedShape = [...parsedShape, ...Array<string>(minLength - parsedShape.length).fill("1")];
+            adjustedShape = [...Array<string>(minLength - parsedShape.length).fill("1"), ...parsedShape];
         } else {
             if (parsedShape.length <= maxLength) {
                 adjustedShape = [...parsedShape];
