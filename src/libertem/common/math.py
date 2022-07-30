@@ -30,3 +30,16 @@ def prod(iterable: Iterable[ProdAccepted]):
         else:
             raise ValueError()
     return result
+
+
+def count_nonzero(array):
+    try:
+        return np.count_nonzero(array)
+    except TypeError:
+        return array.nnz
+
+
+def flat_nonzero(array):
+    if array is None:
+        return None
+    return array.flatten().nonzero()[0]

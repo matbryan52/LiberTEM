@@ -23,7 +23,7 @@ from libertem.common.buffers import (
 )
 from libertem.common import Shape, Slice
 from libertem.common.udf import TilingPreferences, UDFProtocol
-from libertem.common.math import prod
+from libertem.common.math import prod, count_nonzero
 from libertem.io.dataset.base import (
     TilingScheme, Negotiator, Partition, DataSet, get_coordinates
 )
@@ -2099,7 +2099,7 @@ class UDFRunner:
         for idx, partition in enumerate(dataset.get_partitions()):
             if roi is not None:
                 roi_for_part = self._roi_for_partition(roi, partition)
-                if np.count_nonzero(roi_for_part) == 0:
+                if count_nonzero(roi_for_part) == 0:
                     # roi is empty for this partition, ignore
                     continue
             udf_classes = [
