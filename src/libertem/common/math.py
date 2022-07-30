@@ -40,6 +40,4 @@ def count_nonzero(array):
 
 
 def flat_nonzero(array):
-    if array is None:
-        return None
     return array.flatten().nonzero()[0]
