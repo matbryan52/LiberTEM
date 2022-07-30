@@ -2,6 +2,7 @@ import numba
 import numpy as np
 
 from libertem.common import Slice
+from libertem.common.math import count_nonzero
 
 
 @numba.njit(nogil=True)
@@ -50,7 +51,7 @@ def _roi_to_nd_indices(roi, part_slice: Slice):
     roi_slice = roi[part_slice.get(nav_only=True)]
     nav_dims = part_slice.shape.nav.dims
     total = 0
-    frames_in_roi = np.count_nonzero(roi)
+    frames_in_roi = count_nonzero(roi)
     for idx, value in np.ndenumerate(roi_slice):
         if not value:
             continue
