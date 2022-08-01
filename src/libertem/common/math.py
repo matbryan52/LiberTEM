@@ -41,3 +41,18 @@ def count_nonzero(array):
 
 def flat_nonzero(array):
     return array.flatten().nonzero()[0]
+
+
+def _sparse_ndenumerate(array):
+    flat_array = array.flatten()
+    nonzero = flat_nonzero(flat_array)
+    for idx in nonzero:
+        coords = np.unravel_index(idx, array.shape)
+        yield coords, flat_array[idx]
+
+
+def ndenumerate(array):
+    try:
+        yield from np.ndenumerate(array)
+    except RuntimeError:
+        yield from _sparse_ndenumerate(array)
