@@ -303,6 +303,7 @@ class DM4DataSet(DataSet):
         partition_cls = DM4Partition if self._array_c_ordered else DM4PartitionFortran
         fileset = self._get_fileset()
         for part_slice, start, stop in self.get_slices():
+            # start and stop can be before/after end of flat_nav
             yield partition_cls(
                 meta=self.meta,
                 partition_slice=part_slice,
@@ -374,12 +375,19 @@ class RawPartitionFortran(BasePartition):
                     )
         reader.create_memmaps()
 
-        part_slice = slice(self._start_frame, self._start_frame + self._num_frames)
+        sync_offset = self.meta.sync_offset
+        ds_size = self.meta.shape.nav.size
+
+        # Define the frames to read in this partition which actually exist
+        # If sync offset is nonzero, some frames are outside of
+        # the array and as such cannot be read from the file
+        part_slice = slice(max(0, self._start_frame),
+                           min(ds_size, self._start_frame + self._num_frames))
         has_roi = roi is not None
         if has_roi:
             # Must unroll the ROI in the same way as the partitions were
             # created, i.e. C- or F- unrolling, held by the shape.nav_order property
-            read_range = np.flatnonzero(roi.reshape(-1))
+            read_range = np.flatnonzero(roi.reshape(-1)) + sync_offset
             read_indices = np.arange(read_range.size, dtype=np.int64)
             part_mask = np.logical_and(read_range >= part_slice.start,
                                        read_range < part_slice.stop)
@@ -391,16 +399,21 @@ class RawPartitionFortran(BasePartition):
         else:
             read_range = (part_slice,)
 
+        slice_offset = -sync_offset if sync_offset > 0 else 0
+        print(read_range, sync_offset, slice_offset, ds_size, self._start_frame)
+
         for frame_idcs, scheme_idx, tile in reader.generate_tiles(*read_range):
             # frame_idcs is tuple(int, ...) of whole-dataset indices
             # not including compression for ROI (same as for read_range arg)
             # the meaning of the whole-dataset indices depends on if the
             # nav dimension was unrolled in F or C-ordering
+            # these frame_idcs are without sync_offset applied and are
+            # the frames actually read from the array in the file
             scheme_slice = tiling_scheme_adj[scheme_idx]
             if has_roi:
-                nav_origin = (index_lookup[frame_idcs[0]],)
+                nav_origin = (index_lookup[frame_idcs[0] - sync_offset],)
             else:
-                nav_origin = (frame_idcs[0],)
+                nav_origin = (frame_idcs[0] + slice_offset,)
             tile_slice = Slice(
                 origin=nav_origin + scheme_slice.origin,
                 shape=tile.shape[:1] + scheme_slice.shape,
