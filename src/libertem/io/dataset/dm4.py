@@ -370,7 +370,6 @@ class RawPartitionFortran(BasePartition):
                         sig_order=self.sig_order,
                         file_header=file.file_header_bytes,
                     )
-        reader.create_memmaps()
 
         sync_offset = self.meta.sync_offset
         ds_size = self.meta.shape.nav.size

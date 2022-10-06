@@ -1,9 +1,12 @@
 import os
 import operator
 import typing
+import mmap
+import contextlib
 from typing import Tuple, Union, Generator, Iterable, List, Set, Dict, Any
 from typing_extensions import Literal
 import concurrent.futures
+import concurrent.futures as cf
 import itertools
 import functools
 import numpy as np
@@ -34,8 +37,7 @@ class FortranReader:
     of DM4 files the data is (flat_sig, flat_nav) but the signal and nav
     dimensions were individually unrolled using C-order
     """
-    MIN_MEMMAP_SIZE = 512 * 2 ** 20  # 512 MB
-    MAX_NUM_MEMMAP: int = 16
+    MAX_MEMMAP_SIZE = 512 * 2 ** 20  # 512 MB
     BUFFER_SIZE: int = 128 * 2 ** 20
     THRESHOLD_COMBINE: int = 8  # small slices to convert to index arrays
 
@@ -53,8 +55,6 @@ class FortranReader:
         self._sig_size = shape.sig.size
         self._sig_order = sig_order
         self._tiling_scheme = tiling_scheme
-
-        self._memmaps = []
 
         self.verify_tiling(tiling_scheme, shape, sig_order)
         chunks, self._chunk_slices, chunk_scheme_indices = self.choose_chunks(tiling_scheme,
@@ -85,6 +85,15 @@ class FortranReader:
 
     @classmethod
     def choose_chunks(cls, tiling_scheme: 'TilingScheme', shape: 'Shape', dtype: 'DTypeLike'):
+        """
+        Choose sequential chunks of the file which generally align
+        with the tiling_scheme and are as close to MAX_MEMMAP_SIZE
+        as possible. Each chunk will be accessed separately to manage
+        memory usage, hence the adherence to the size limit.
+
+        A chunk may contain multiple tiles, or multiple adjacent chunks
+        may need to combine to provide a single tile.
+        """
         # NOTE could refactor and use tiling_scheme.dataset_shape
 
         # Merge or split tiles to get good sized chunks
@@ -97,11 +106,10 @@ class FortranReader:
         scheme_indices = list(range(len(tile_widths)))
 
         nav_bytesize = np.dtype(dtype).itemsize * nav_size
-        min_width_bytesize = cls.MIN_MEMMAP_SIZE // nav_bytesize
-        min_width_number = sig_size // cls.MAX_NUM_MEMMAP
+        max_width_bytesize = cls.MAX_MEMMAP_SIZE // nav_bytesize
         data_size = sig_size * nav_size
-        min_width = min(data_size, max(min_width_bytesize, min_width_number))
-        max_width = min(data_size, 2 * min_width)
+        max_width = min(data_size, max_width_bytesize)
+
         # Split big chunks
         while max(tile_widths) > max_width:
             max_idx = np.argmax(tile_widths)
@@ -110,45 +118,24 @@ class FortranReader:
             new_schemes = [scheme_indices[max_idx], scheme_indices[max_idx]]
             tile_widths = tile_widths[:max_idx] + new_widths + tile_widths[max_idx + 1:]
             scheme_indices = scheme_indices[:max_idx] + new_schemes + scheme_indices[max_idx + 1:]
-        # Combine small chunks
-        # at this point we are guaranteed to have at least min_num_chunks
         scheme_indices = [{i} for i in scheme_indices]
-        # and all elements in scheme_indices are set(integer)
-        while len(tile_widths) > 1 and min(tile_widths) < min_width:
-            min_idx = np.argmin(tile_widths)
-            min_val = tile_widths[min_idx]
-            min_scheme = scheme_indices[min_idx]
-            if min_idx == (len(tile_widths) - 1):
-                # Merging final tile
-                merge_to = min_idx - 1
-            elif min_idx == 0:
-                # merging first
-                merge_to = 1
-            else:
-                previous_idx = min_idx - 1
-                next_idx = min_idx + 1
-                before_si = scheme_indices[previous_idx]
-                after_si = scheme_indices[next_idx]
-                intersects_before = min_scheme.intersection(before_si)
-                intersects_after = min_scheme.intersection(after_si)
-                if intersects_before and intersects_after:
-                    # ties will break to previous_idx
-                    merge_to = min((previous_idx, next_idx), key=lambda x: tile_widths[x])
-                elif intersects_before:
-                    merge_to = previous_idx
-                elif intersects_after:
-                    merge_to = next_idx
-                else:
-                    # intersects neither, merge to the index with the
-                    # fewest associated scheme indices
-                    # will break ties by merging into previous_idx
-                    merge_to = min((previous_idx, next_idx), key=lambda x: len(scheme_indices[x]))
-            # Perform the merge and pop current min
-            tile_widths[merge_to] += min_val
-            scheme_indices[merge_to] = scheme_indices[merge_to].union(scheme_indices[min_idx])
-            tile_widths.pop(min_idx)
-            scheme_indices.pop(min_idx)
 
+        # Combine small chunks
+        while True:
+            merge_to = None
+            for idx, width in enumerate(tile_widths[:-1]):
+                if tile_widths[idx + 1] + width <= max_width:
+                    merge_to = idx + 1
+                    break
+            if merge_to is not None:
+                tile_widths[merge_to] += width
+                scheme_indices[merge_to] = scheme_indices[merge_to].union(scheme_indices[idx])
+                tile_widths.pop(idx)
+                scheme_indices.pop(idx)
+            else:
+                break
+
+        # Prepare outputs
         tile_widths: Tuple[int]
         chunks = tuple((width,) + (nav_size,)
                        for width in tile_widths)
@@ -205,30 +192,27 @@ class FortranReader:
                                   in scheme_map_combination.items()}
         return scheme_map_independent, scheme_map_combination
 
-    def create_memmaps(self):
-        # Always memmap in C-order (slice_of_flat_sig), whole_flat_nav)
-        # Access is fast to a full set of values for a single sig pixel
-        # which reflects how the data is laid out
-        # The memmap will be used for slicing into whole_flat_nav,
-        # however this is unavoidable!
-        assert len(self._memmaps) == 0
-        for offset, chunkshape in self._chunks:
-            self._memmaps.append(np.memmap(self._path,
-                                           mode='r',
-                                           dtype=self._dtype,
-                                           offset=offset,
-                                           shape=chunkshape))
+    @contextlib.contextmanager
+    def create_memmap(self, idx):
+        with open(self._path, 'rb') as handle:
+            file_memmap = mmap.mmap(
+                fileno=handle.fileno(),
+                length=0,
+                offset=0,
+                access=mmap.ACCESS_READ,
+            )
+            offset, chunkshape = self._chunks[idx]
+            chunk_bytesize = self._byte_size(chunkshape)
+            chunk_memory = memoryview(file_memmap)[offset: offset + chunk_bytesize]
+            array_view = np.frombuffer(chunk_memory, dtype=self._dtype).reshape(chunkshape)
+            yield array_view
+            del array_view
+            del file_memmap
 
     def _byte_size(self, shape: Iterable) -> int:
         return np.dtype(self._dtype).itemsize * np.prod(shape, dtype=np.int64)
 
-    def reset_memmaps(self):
-        # This may be necessary to call occasionally to prevent memory issues
-        self._memmaps.clear()
-        self.create_memmaps()
-
-    @staticmethod
-    def _load_data(memmap: np.ndarray,
+    def _load_data(self,
                    slices: Tuple[Iterable, slice],
                    out_buf: np.ndarray,
                    idx: int) -> int:
@@ -237,16 +221,17 @@ class FortranReader:
 
         Return idx to allow tracking which memmap chunk(s) just completed
         """
-        slice_start = 0
-        for sl in slices:
-            # sl can be a slice or index array
-            try:
-                length = sl.stop - sl.start
-            except AttributeError:
-                length = len(sl)
-            out_buf[..., slice_start:slice_start + length] = memmap[..., sl]
-            slice_start += length
-        return idx
+        with self.create_memmap(idx) as memmap:
+            slice_start = 0
+            for sl in slices:
+                # sl can be a slice or index array
+                try:
+                    length = sl.stop - sl.start
+                except AttributeError:
+                    length = len(sl)
+                out_buf[..., slice_start:slice_start + length] = memmap[..., sl]
+                slice_start += length
+            return idx
 
     def generate_tiles(self, *index_or_slice: Union[int, slice, Iterable])\
             -> Generator[Tuple[Tuple[int], int, np.ndarray], None, None]:
@@ -273,16 +258,14 @@ class FortranReader:
                                                 *index_or_slice)
         out_buffer = np.empty((self._sig_size, buffer_length), dtype=self._dtype)
 
-        with concurrent.futures.ThreadPoolExecutor() as p:
+        with cf.ThreadPoolExecutor(1) as p:
             for mmap_nav_slices, buffer_nav_slice, buffer_unpacks in reads:
                 combined_slices = self._slice_combine_array(*mmap_nav_slices)
                 raw_futures = []
-                for raw_idx, (memmap, buffer_sig_slice) in enumerate(zip(self._memmaps,
-                                                                         self._chunk_slices)):
+                for raw_idx, buffer_sig_slice in enumerate(self._chunk_slices):
                     raw_futures.append(
                             p.submit(
                                 self._load_data,
-                                memmap,
                                 combined_slices,
                                 out_buffer[buffer_sig_slice, buffer_nav_slice],
                                 raw_idx
@@ -290,7 +273,7 @@ class FortranReader:
                         )
                 combined_futures = self._combine_raw_futures(raw_futures, p)
                 tiles_completed = set()
-                for complete in concurrent.futures.as_completed(raw_futures + combined_futures):
+                for complete in cf.as_completed(raw_futures + combined_futures):
                     chunks_completed = complete.result()
                     tiles_ready = self._chunk_map[chunks_completed]
                     tiles_to_yield = tiles_ready.difference(tiles_completed)

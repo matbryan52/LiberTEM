@@ -3,6 +3,7 @@ import numpy as np
 
 import pytest
 
+from libertem.common.math import prod
 from libertem.common.shape import Shape
 from libertem.io.dataset.base.tiling_scheme import TilingScheme
 from libertem.io.dataset.base.backend_fortran import FortranReader
@@ -277,8 +278,12 @@ def test_choose_chunks(ds_size_mb, num_tiles):
                                                                        shape,
                                                                        dtype)
 
-    # Check we meet max num memmap param
-    assert len(chunks) <= FortranReader.MAX_NUM_MEMMAP
+    # Check we meet max memmap size param
+    sizes = tuple(prod(c) * itemsize for c in chunks)
+    assert all(s <= FortranReader.MAX_MEMMAP_SIZE for s in sizes)
+    # Check no combination of adjacent chunks <= MAX_MEMMAP_SIZE
+    assert not any(s0 + s1 <= FortranReader.MAX_MEMMAP_SIZE
+                   for s0, s1 in zip(sizes[:-1], sizes[1:]))
     # All scheme indices are provided by the chunks
     assert set().union(*scheme_indices) == set(range(len(tiling_scheme)))
     # All scheme chunks cover the full nav_dimension
