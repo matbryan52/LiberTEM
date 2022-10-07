@@ -1,8 +1,6 @@
 import os
 import operator
 import typing
-import mmap
-import contextlib
 from typing import Tuple, Union, Generator, Iterable, List, Set, Dict, Any
 from typing_extensions import Literal
 import concurrent.futures
@@ -38,7 +36,7 @@ class FortranReader:
     dimensions were individually unrolled using C-order
     """
     MAX_MEMMAP_SIZE = 512 * 2 ** 20  # 512 MB
-    BUFFER_SIZE: int = 128 * 2 ** 20
+    BUFFER_SIZE: int = 64 * 2 ** 20
     THRESHOLD_COMBINE: int = 8  # small slices to convert to index arrays
 
     def __init__(self,
@@ -192,27 +190,18 @@ class FortranReader:
                                   in scheme_map_combination.items()}
         return scheme_map_independent, scheme_map_combination
 
-    @contextlib.contextmanager
     def create_memmap(self, idx):
-        with open(self._path, 'rb') as handle:
-            file_memmap = mmap.mmap(
-                fileno=handle.fileno(),
-                length=0,
-                offset=0,
-                access=mmap.ACCESS_READ,
-            )
-            offset, chunkshape = self._chunks[idx]
-            chunk_bytesize = self._byte_size(chunkshape)
-            chunk_memory = memoryview(file_memmap)[offset: offset + chunk_bytesize]
-            array_view = np.frombuffer(chunk_memory, dtype=self._dtype).reshape(chunkshape)
-            yield array_view
-            del array_view
-            del file_memmap
+        offset, chunkshape = self._chunks[idx]
+        return np.memmap(self._path, mode='r', offset=offset, dtype=self._dtype, shape=chunkshape)
+
+    def create_memmaps(self):
+        return [self.create_memmap(idx) for idx in range(len(self._chunks))]
 
     def _byte_size(self, shape: Iterable) -> int:
         return np.dtype(self._dtype).itemsize * np.prod(shape, dtype=np.int64)
 
     def _load_data(self,
+                   memmap,
                    slices: Tuple[Iterable, slice],
                    out_buf: np.ndarray,
                    idx: int) -> int:
@@ -221,17 +210,16 @@ class FortranReader:
 
         Return idx to allow tracking which memmap chunk(s) just completed
         """
-        with self.create_memmap(idx) as memmap:
-            slice_start = 0
-            for sl in slices:
-                # sl can be a slice or index array
-                try:
-                    length = sl.stop - sl.start
-                except AttributeError:
-                    length = len(sl)
-                out_buf[..., slice_start:slice_start + length] = memmap[..., sl]
-                slice_start += length
-            return idx
+        slice_start = 0
+        for sl in slices:
+            # sl can be a slice or index array
+            try:
+                length = sl.stop - sl.start
+            except AttributeError:
+                length = len(sl)
+            out_buf[..., slice_start:slice_start + length] = memmap[..., sl]
+            slice_start += length
+        return idx
 
     def generate_tiles(self, *index_or_slice: Union[int, slice, Iterable])\
             -> Generator[Tuple[Tuple[int], int, np.ndarray], None, None]:
@@ -258,14 +246,17 @@ class FortranReader:
                                                 *index_or_slice)
         out_buffer = np.empty((self._sig_size, buffer_length), dtype=self._dtype)
 
-        with cf.ThreadPoolExecutor(1) as p:
+        with cf.ThreadPoolExecutor() as p:
             for mmap_nav_slices, buffer_nav_slice, buffer_unpacks in reads:
+                # This will dereference any prior memmaps and free memory
+                memmaps = self.create_memmaps()
                 combined_slices = self._slice_combine_array(*mmap_nav_slices)
                 raw_futures = []
                 for raw_idx, buffer_sig_slice in enumerate(self._chunk_slices):
                     raw_futures.append(
                             p.submit(
                                 self._load_data,
+                                memmaps[raw_idx],
                                 combined_slices,
                                 out_buffer[buffer_sig_slice, buffer_nav_slice],
                                 raw_idx
