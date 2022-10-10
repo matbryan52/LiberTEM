@@ -4,7 +4,6 @@ import typing
 from typing import Tuple, Union, Generator, Iterable, List, Set, Dict, Any
 from typing_extensions import Literal
 import concurrent.futures
-import concurrent.futures as cf
 import itertools
 import functools
 import numpy as np
@@ -35,8 +34,8 @@ class FortranReader:
     of DM4 files the data is (flat_sig, flat_nav) but the signal and nav
     dimensions were individually unrolled using C-order
     """
-    MAX_MEMMAP_SIZE = 512 * 2 ** 20  # 512 MB
-    BUFFER_SIZE: int = 64 * 2 ** 20
+    MAX_MEMMAP_SIZE = 1024 * 2 ** 20  # 1024 MB
+    BUFFER_SIZE: int = 128 * 2 ** 20
     THRESHOLD_COMBINE: int = 8  # small slices to convert to index arrays
 
     def __init__(self,
@@ -65,6 +64,9 @@ class FortranReader:
         self._chunks = tuple((o, c) for o, c in zip(offsets, chunks))
         independent_chunks, self._chunk_combinations = self.build_chunk_map(chunk_scheme_indices)
         self._chunk_map = {**independent_chunks, **self._chunk_combinations}
+
+        assert not self._chunk_combinations
+        assert all(s for s in self._chunk_map.values())
 
     @staticmethod
     def verify_tiling(tiling_scheme: 'TilingScheme', shape: 'Shape', sig_order: Literal['F', 'C']):
@@ -246,41 +248,27 @@ class FortranReader:
                                                 *index_or_slice)
         out_buffer = np.empty((self._sig_size, buffer_length), dtype=self._dtype)
 
-        with cf.ThreadPoolExecutor() as p:
+        for raw_idx, buffer_sig_slice in enumerate(self._chunk_slices):
+            memmap = self.create_memmap(raw_idx)
             for mmap_nav_slices, buffer_nav_slice, buffer_unpacks in reads:
-                # This will dereference any prior memmaps and free memory
-                memmaps = self.create_memmaps()
                 combined_slices = self._slice_combine_array(*mmap_nav_slices)
-                raw_futures = []
-                for raw_idx, buffer_sig_slice in enumerate(self._chunk_slices):
-                    raw_futures.append(
-                            p.submit(
-                                self._load_data,
-                                memmaps[raw_idx],
-                                combined_slices,
-                                out_buffer[buffer_sig_slice, buffer_nav_slice],
-                                raw_idx
-                            )
-                        )
-                combined_futures = self._combine_raw_futures(raw_futures, p)
-                tiles_completed = set()
-                for complete in cf.as_completed(raw_futures + combined_futures):
-                    chunks_completed = complete.result()
-                    tiles_ready = self._chunk_map[chunks_completed]
-                    tiles_to_yield = tiles_ready.difference(tiles_completed)
-                    if not tiles_to_yield:
-                        continue
-                    tiles_completed = tiles_completed.union(tiles_to_yield)
-                    for (buffer_nav_slice, idcs_in_flat_nav) in buffer_unpacks:
-                        for scheme_index in tiles_to_yield:
-                            # flat_tile has dims (flat_sig, flat_nav)
-                            flat_tile = out_buffer[tile_slices[scheme_index],
-                                                   buffer_nav_slice]
-                            tile_shape = tile_shapes[scheme_index] + flat_tile.shape[-1:]
-                            tile = flat_tile.reshape(tile_shape, order=self._sig_order)
-                            # must roll final axis to provide shape == (nav, *sig)
-                            tile = np.moveaxis(tile, -1, 0)
-                            yield idcs_in_flat_nav, scheme_index, tile
+                self._load_data(
+                    memmap,
+                    combined_slices,
+                    out_buffer[buffer_sig_slice, buffer_nav_slice],
+                    raw_idx
+                )
+                tiles_ready = self._chunk_map[raw_idx]
+                for (buffer_nav_slice, idcs_in_flat_nav) in buffer_unpacks:
+                    for scheme_index in tiles_ready:
+                        # flat_tile has dims (flat_sig, flat_nav)
+                        flat_tile = out_buffer[tile_slices[scheme_index],
+                                               buffer_nav_slice]
+                        tile_shape = tile_shapes[scheme_index] + flat_tile.shape[-1:]
+                        tile = flat_tile.reshape(tile_shape, order=self._sig_order)
+                        # must roll final axis to provide shape == (nav, *sig)
+                        tile = np.moveaxis(tile, -1, 0)
+                        yield idcs_in_flat_nav, scheme_index, tile
 
     def _combine_raw_futures(self,
                              futures: Iterable[concurrent.futures.Future],
