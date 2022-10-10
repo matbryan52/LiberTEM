@@ -3,7 +3,6 @@ import operator
 import typing
 from typing import Tuple, Union, Generator, Iterable, List, Set, Dict, Any
 from typing_extensions import Literal
-import concurrent.futures
 import itertools
 import functools
 import numpy as np
@@ -64,9 +63,22 @@ class FortranReader:
         self._chunks = tuple((o, c) for o, c in zip(offsets, chunks))
         independent_chunks, self._chunk_combinations = self.build_chunk_map(chunk_scheme_indices)
         self._chunk_map = {**independent_chunks, **self._chunk_combinations}
+        # Sort chunk maps so that chunks are read sequentially
+        self._chunk_map = {k: v
+                           for k, v
+                           in sorted(self._chunk_map.items(), key=self._sort_dict_int)
+                           if v}
+        # Check that a chunk exists in a combination,
+        # or uniquely, but not both to avoid double-reading
+        assert len(tuple(self._splat_iterables(*self._chunk_map)))\
+            == len(set(self._splat_iterables(*self._chunk_map)))
+        # assert not self._chunk_combinations
+        # assert all(s for s in self._chunk_map.values())
 
-        assert not self._chunk_combinations
-        assert all(s for s in self._chunk_map.values())
+    @staticmethod
+    def _sort_dict_int(kv):
+        key, _ = kv
+        return key[0] if isinstance(key, tuple) else key
 
     @staticmethod
     def verify_tiling(tiling_scheme: 'TilingScheme', shape: 'Shape', sig_order: Literal['F', 'C']):
@@ -82,6 +94,9 @@ class FortranReader:
                                                                  'in last dim only')
         else:
             raise ValueError(f'sig_order {sig_order} not recognized')
+        # should also encourage that (nav_size * itemsize * shape.sig[1:]) < cls.MAX_MEMMAP_SIZE
+        # else we will have tiles spanning multiple chunks with read overhead
+        # favour small tiles to get optimal behaviour
 
     @classmethod
     def choose_chunks(cls, tiling_scheme: 'TilingScheme', shape: 'Shape', dtype: 'DTypeLike'):
@@ -205,8 +220,7 @@ class FortranReader:
     def _load_data(self,
                    memmap,
                    slices: Tuple[Iterable, slice],
-                   out_buf: np.ndarray,
-                   idx: int) -> int:
+                   out_buf: np.ndarray) -> int:
         """
         Read slices/values from memmap into out_buf sequentially in the last dimension
 
@@ -221,7 +235,6 @@ class FortranReader:
                 length = len(sl)
             out_buf[..., slice_start:slice_start + length] = memmap[..., sl]
             slice_start += length
-        return idx
 
     def generate_tiles(self, *index_or_slice: Union[int, slice, Iterable])\
             -> Generator[Tuple[Tuple[int], int, np.ndarray], None, None]:
@@ -242,51 +255,58 @@ class FortranReader:
         tile_shapes = tuple(s.shape.to_tuple() for s in self._tiling_scheme)
         tile_slices = self._flat_tile_slices(tile_shapes)
         index_or_slice = tuple(self._splat_iterables(*index_or_slice))
-        ideal_depth = 1 + self.BUFFER_SIZE // (self._sig_size * np.dtype(self._dtype).itemsize)
+        # max_tilesize = self._get_max_tilesize(self._tiling_scheme)
+        chunksizes = tuple(s.stop - s.start for s in self._chunk_slices)
+        combination_sizes = tuple(sum(chunksizes[kk] for kk in k) for k in self._chunk_combinations)
+        max_sig_block = max(*combination_sizes, *chunksizes)
+        # implicit max with the 1 + even if // rounds down to 0
+        ideal_depth = 1 + self.BUFFER_SIZE // (max_sig_block * np.dtype(self._dtype).itemsize)
         buffer_length, reads = self._plan_reads(ideal_depth,
                                                 self._tiling_scheme.depth,
                                                 *index_or_slice)
-        out_buffer = np.empty((self._sig_size, buffer_length), dtype=self._dtype)
+        out_buffer = np.empty((max_sig_block, buffer_length), dtype=self._dtype)
 
-        for raw_idx, buffer_sig_slice in enumerate(self._chunk_slices):
-            memmap = self.create_memmap(raw_idx)
+        current_memmap_idx = -1
+        for chunks, scheme_indices in self._chunk_map.items():
+            chunks = chunks if isinstance(chunks, tuple) else (chunks,)
+            buffer_sig_offset = self._chunk_slices[chunks[0]].start
             for mmap_nav_slices, buffer_nav_slice, buffer_unpacks in reads:
-                combined_slices = self._slice_combine_array(*mmap_nav_slices)
-                self._load_data(
-                    memmap,
-                    combined_slices,
-                    out_buffer[buffer_sig_slice, buffer_nav_slice],
-                    raw_idx
-                )
-                tiles_ready = self._chunk_map[raw_idx]
-                for (buffer_nav_slice, idcs_in_flat_nav) in buffer_unpacks:
-                    for scheme_index in tiles_ready:
+                sig_read = 0
+                for raw_idx in chunks:
+                    sig_read_length = chunksizes[raw_idx]
+                    if current_memmap_idx != raw_idx:
+                        memmap = self.create_memmap(raw_idx)
+                        current_memmap_idx = raw_idx
+                    combined_slices = self._slice_combine_array(*mmap_nav_slices)
+                    # The calls to _load_data could be threaded to parallise I/O and processing
+                    self._load_data(
+                        memmap,
+                        combined_slices,
+                        out_buffer[sig_read: sig_read + sig_read_length,
+                                   buffer_nav_slice],
+                    )
+                sig_read += sig_read_length
+
+                for (unpack_nav_slice, idcs_in_flat_nav) in buffer_unpacks:
+                    for scheme_index in scheme_indices:
                         # flat_tile has dims (flat_sig, flat_nav)
-                        flat_tile = out_buffer[tile_slices[scheme_index],
-                                               buffer_nav_slice]
+                        flat_tile_slice = tile_slices[scheme_index]
+                        # Shift tile slice from whole sig buffer to partial sig buffer
+                        shifted_tile_slice = slice(flat_tile_slice.start - buffer_sig_offset,
+                                                   flat_tile_slice.stop - buffer_sig_offset)
+                        flat_tile = out_buffer[shifted_tile_slice,
+                                               unpack_nav_slice]
                         tile_shape = tile_shapes[scheme_index] + flat_tile.shape[-1:]
                         tile = flat_tile.reshape(tile_shape, order=self._sig_order)
                         # must roll final axis to provide shape == (nav, *sig)
                         tile = np.moveaxis(tile, -1, 0)
                         yield idcs_in_flat_nav, scheme_index, tile
 
-    def _combine_raw_futures(self,
-                             futures: Iterable[concurrent.futures.Future],
-                             pool: concurrent.futures.Executor) -> List[concurrent.futures.Future]:
-        """
-        Combines futures according to self._chunk_combinations,
-        which was created during __init__, to allow us to wait for multiple
-        chunks to complete before yielding tiles which depend on them
-        """
-        return [pool.submit(self._combine, *tuple(futures[i] for i in combination))
-                for combination in self._chunk_combinations.keys()]
-
     @staticmethod
-    def _combine(*futures: concurrent.futures.Future) -> Tuple[int]:
-        """
-        Wait on all provided futures to complete before returning
-        """
-        return tuple(f.result() for f in futures)
+    def _get_max_tilesize(tiling_scheme):
+        tile_sizes = np.prod(tiling_scheme.slices_array[:, 1, :], axis=-1)
+        max_idx = np.argmax(tile_sizes, axis=0)
+        return tile_sizes[max_idx]
 
     @classmethod
     def _plan_reads(cls,
@@ -334,6 +354,9 @@ class FortranReader:
             # hold 1 or more complete tile/frame stacks in the buffer
             buffer_length = ideal_depth - (ideal_depth % ts_depth)
             buffer_length = max(ts_depth, buffer_length)
+
+        # Don't allocate buffer longer than frames in the partition
+        buffer_length = min(buffer_length, to_read)
 
         # split splices down to len(sl) == buffer_length at maximum
         # must functools.reduce because self._split_slice returns tuples of slices
