@@ -9,6 +9,7 @@ import numpy as np
 from math import ceil, floor
 
 from libertem.common.math import prod
+from .exceptions import DataSetException
 
 if typing.TYPE_CHECKING:
     from libertem.common.shape import Shape
@@ -70,11 +71,11 @@ class FortranReader:
         # if a sig slice does not span all dimensions except
         # the first/last (for C-/F-) then the slices can't be ravelled
         if sig_order == 'C':
-            assert (slices[:, 1, 1:] == shape.sig[1:]).all(), ('slices not split '
-                                                               'in first dim only')
+            if not (slices[:, 1, 1:] == shape.sig[1:]).all():
+                raise DataSetException('slices not split in first dim only')
         elif sig_order == 'F':
-            assert (slices[:, 1, :-1] == shape.sig[:-1]).all(), ('slices not split '
-                                                                 'in last dim only')
+            if not (slices[:, 1, :-1] == shape.sig[:-1]).all():
+                raise DataSetException('slices not split in last dim only')
         else:
             raise ValueError(f'sig_order {sig_order} not recognized')
         # should also encourage that (nav_size * itemsize * shape.sig[1:]) < cls.MAX_MEMMAP_SIZE

@@ -5,6 +5,7 @@ import pytest
 
 from libertem.common.math import prod
 from libertem.common.shape import Shape
+from libertem.io.dataset.base.exceptions import DataSetException
 from libertem.io.dataset.base.tiling_scheme import TilingScheme
 from libertem.io.dataset.base.backend_fortran import FortranReader
 
@@ -191,8 +192,8 @@ def test_plan_reads(repeat):
     "shape, tileshape, order, raises",
     [
         (Shape((8, 30, 50), 2), Shape((3, 30, 3), 2), 'F', None),
-        (Shape((8, 30, 50), 2), Shape((3, 10, 5), 2), 'F', AssertionError),
-        (Shape((8, 30, 50), 2), Shape((3, 4, 15), 2), 'C', AssertionError),
+        (Shape((8, 30, 50), 2), Shape((3, 10, 5), 2), 'F', DataSetException),
+        (Shape((8, 30, 50), 2), Shape((3, 4, 15), 2), 'C', DataSetException),
         (Shape((8, 4, 30, 50), 3), Shape((3, 1, 50, 50), 3), 'C', None),
         (Shape((1, 2, 3), 2), Shape((1, 2, 3), 2), 'K', ValueError),
     ],
