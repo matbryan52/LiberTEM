@@ -14,7 +14,7 @@ if typing.TYPE_CHECKING:
     from libertem.common.shape import Shape
     from libertem.io.dataset.base.tiling_scheme import TilingScheme
     from numpy.typing import DTypeLike
-    ChunkMapT = Dict[Union[int, Tuple[int]], Set[int]]
+    ChunkMapT = Dict[Union[int, Tuple[int, ...]], Set[int]]
 
 
 class FortranReader:
@@ -53,32 +53,15 @@ class FortranReader:
         self._tiling_scheme = tiling_scheme
 
         self.verify_tiling(tiling_scheme, shape, sig_order)
-        chunks, self._chunk_slices, chunk_scheme_indices = self.choose_chunks(tiling_scheme,
-                                                                              shape,
-                                                                              dtype)
+        chunks, chunk_scheme_indices = self.choose_chunks(tiling_scheme,
+                                                          shape,
+                                                          dtype)
         chunksizes = tuple(self._byte_size(chunkshape)
                            for chunkshape in chunks)
         offsets = tuple(self._file_header + sum(chunksizes[:idx])
                         for idx in range(len(chunksizes)))
         self._chunks = tuple((o, c) for o, c in zip(offsets, chunks))
-        independent_chunks, self._chunk_combinations = self.build_chunk_map(chunk_scheme_indices)
-        self._chunk_map = {**independent_chunks, **self._chunk_combinations}
-        # Sort chunk maps so that chunks are read sequentially
-        self._chunk_map = {k: v
-                           for k, v
-                           in sorted(self._chunk_map.items(), key=self._sort_dict_int)
-                           if v}
-        # Check that a chunk exists in a combination,
-        # or uniquely, but not both to avoid double-reading
-        assert len(tuple(self._splat_iterables(*self._chunk_map)))\
-            == len(set(self._splat_iterables(*self._chunk_map)))
-        # assert not self._chunk_combinations
-        # assert all(s for s in self._chunk_map.values())
-
-    @staticmethod
-    def _sort_dict_int(kv):
-        key, _ = kv
-        return key[0] if isinstance(key, tuple) else key
+        self._chunk_map = self.build_chunk_map(chunk_scheme_indices)
 
     @staticmethod
     def verify_tiling(tiling_scheme: 'TilingScheme', shape: 'Shape', sig_order: Literal['F', 'C']):
@@ -154,14 +137,10 @@ class FortranReader:
         tile_widths: Tuple[int]
         chunks = tuple((width,) + (nav_size,)
                        for width in tile_widths)
-        boundaries = [0] + np.cumsum(tile_widths).tolist()
-        # self._chunk_slices are the flat-sig slice objects for each mmap chunk
-        # used to assign each loaded chunk into the output buffer
-        chunk_slices = tuple(slice(a, b) for a, b in zip(boundaries[:-1], boundaries[1:]))
-        return chunks, chunk_slices, scheme_indices
+        return chunks, scheme_indices
 
     @staticmethod
-    def build_chunk_map(chunk_scheme_indices: List[Set[int]]) -> Tuple['ChunkMapT', 'ChunkMapT']:
+    def build_chunk_map(chunk_scheme_indices: List[Set[int]]) -> 'ChunkMapT':
         """
         Build the mapping between a chunk of the file and
         the scheme indices it can provide. Needed as depending on
@@ -171,11 +150,12 @@ class FortranReader:
             - a mixture of complete and incomplete tile stacks
 
         and therefore might have to be combined with other chunks
-        before a tile can be marked as ready
+        before a tile can be ready for processing
 
-        Returns both the dictonary mapping {chunk_idx: {scheme_indices}}
+        Returns a single dictonary mapping {chunk_idx: {scheme_indices}}
         for individual chunks, and {tuple(chunk_idx): {scheme_indices}}
-        for necessary combinations of chunks and the scheme_indices they provide
+        for necessary combinations of chunks and the scheme_indices provided
+        Any chunk providing no tiles on its own is removed from the mapping
         """
         if not all(c for c in chunk_scheme_indices):
             raise ValueError('Cannot map empty chunk')
@@ -205,7 +185,14 @@ class FortranReader:
                 scheme_map_combination[chunks_for_tile] = [tile_idx]
         scheme_map_combination = {k: set(v) for k, v
                                   in scheme_map_combination.items()}
-        return scheme_map_independent, scheme_map_combination
+        chunk_map = {**scheme_map_independent, **scheme_map_combination}
+        # Sort chunk maps so that chunks are read sequentially
+        # Remove any chunks which don't provide tiles on their own
+        chunk_map = {k: v
+                     for k, v
+                     in sorted(chunk_map.items(), key=FortranReader._sort_dict_int)
+                     if v}
+        return chunk_map
 
     def create_memmap(self, idx):
         offset, chunkshape = self._chunks[idx]
@@ -236,6 +223,24 @@ class FortranReader:
             out_buf[..., slice_start:slice_start + length] = memmap[..., sl]
             slice_start += length
 
+    @classmethod
+    def _ideal_buffer_size(cls,
+                           chunksizes: Tuple[int, ...],
+                           combinations: Iterable[int],
+                           dtype: 'DTypeLike') -> Tuple[int, int]:
+        """
+        Find the largest chunk or necessary combination of chunks
+        and determine the depth which creates a buffer best matching
+        the BUFFER_SIZE attribute
+        """
+        combination_sizes = tuple(sum(chunksizes[kk] for kk in k)
+                                  for k in combinations
+                                  if isinstance(k, tuple))
+        max_sig_block = max(combination_sizes + chunksizes)
+        # implicit max with the 1 + even if // rounds down to 0
+        ideal_depth = 1 + cls.BUFFER_SIZE // (max_sig_block * np.dtype(dtype).itemsize)
+        return (max_sig_block, ideal_depth)
+
     def generate_tiles(self, *index_or_slice: Union[int, slice, Iterable])\
             -> Generator[Tuple[Tuple[int], int, np.ndarray], None, None]:
         """
@@ -252,15 +257,15 @@ class FortranReader:
         on disk, i.e. if you want the frames to be read in Fortran order
         then provide *index_or_slice for a Fortran unrolling of the nav dims
         """
+        chunksizes = tuple(c[0] for _, c in self._chunks)
+        chunk_offsets = tuple(itertools.accumulate(chunksizes, initial=0))
+        (max_sig_block, ideal_depth) = self._ideal_buffer_size(chunksizes,
+                                                               self._chunk_map.keys(),
+                                                               self._dtype)
+
         tile_shapes = tuple(s.shape.to_tuple() for s in self._tiling_scheme)
         tile_slices = self._flat_tile_slices(tile_shapes)
         index_or_slice = tuple(self._splat_iterables(*index_or_slice))
-        # max_tilesize = self._get_max_tilesize(self._tiling_scheme)
-        chunksizes = tuple(s.stop - s.start for s in self._chunk_slices)
-        combination_sizes = tuple(sum(chunksizes[kk] for kk in k) for k in self._chunk_combinations)
-        max_sig_block = max(combination_sizes + chunksizes)
-        # implicit max with the 1 + even if // rounds down to 0
-        ideal_depth = 1 + self.BUFFER_SIZE // (max_sig_block * np.dtype(self._dtype).itemsize)
         buffer_length, reads = self._plan_reads(ideal_depth,
                                                 self._tiling_scheme.depth,
                                                 *index_or_slice)
@@ -269,7 +274,7 @@ class FortranReader:
         current_memmap_idx = -1
         for chunks, scheme_indices in self._chunk_map.items():
             chunks = chunks if isinstance(chunks, tuple) else (chunks,)
-            buffer_sig_offset = self._chunk_slices[chunks[0]].start
+            buffer_sig_offset = chunk_offsets[chunks[0]]
             for mmap_nav_slices, buffer_nav_slice, buffer_unpacks in reads:
                 sig_read = 0
                 for raw_idx in chunks:
@@ -301,12 +306,6 @@ class FortranReader:
                         # must roll final axis to provide shape == (nav, *sig)
                         tile = np.moveaxis(tile, -1, 0)
                         yield idcs_in_flat_nav, scheme_index, tile
-
-    @staticmethod
-    def _get_max_tilesize(tiling_scheme):
-        tile_sizes = np.prod(tiling_scheme.slices_array[:, 1, :], axis=-1)
-        max_idx = np.argmax(tile_sizes, axis=0)
-        return tile_sizes[max_idx]
 
     @classmethod
     def _plan_reads(cls,
@@ -575,80 +574,10 @@ class FortranReader:
         return tuple(slice(a, b) for a, b
                      in zip(boundaries[:-1], boundaries[1:]))
 
-    # @contextlib.contextmanager
-    # def create_file_chunks(self):
-    #     with contextlib.ExitStack() as stack:
-    #         files = [stack.enter_context(
-    #                             FileChunk(
-    #                                 self._path,
-    #                                 chunkshape,
-    #                                 self._dtype,
-    #                                 offset,
-    #                             )
-    #                         )
-    #                  for offset, chunkshape in self._chunks]
-    #         yield files
-
-    # @staticmethod
-    # def _load_data_file(file_chunk: FileChunk,
-    #                     slices: Tuple[Iterable, slice],
-    #                     out_buf: np.ndarray,
-    #                     idx: int) -> int:
-    #     """
-    #     Read slices/values from memmap into out_buf sequentially in the last dimension
-
-    #     Return idx to allow tracking which memmap chunk(s) just completed
-    #     """
-    #     if any(not isinstance(s, slice) for s in slices):
-    #         raise NotImplementedError()
-    #     file_chunk.readinto(slices, out_buf)
-    #     return idx
-
-
-# class FileChunk:
-#     def __init__(self, path, chunk_shape, dtype, start_byte):
-#         self._path = path
-#         self._itemsize = np.dtype(dtype).itemsize
-#         self._blocksize = chunk_shape[-1] * self._itemsize
-#         self._offset = start_byte
-#         self._size = prod(chunk_shape) * self._itemsize
-#         self._handle = None
-
-#     def __enter__(self):
-#         self._handle = open(self._path, 'rb')
-#         return self
-
-#     def __exit__(self, *exc):
-#         try:
-#             self._handle.close()
-#         except OSError:
-#             pass
-
-#     def seek(self, *args, **kwargs):
-#         self._handle.seek(*args, **kwargs)
-
-#     def readinto(self, slices, buffer: np.ndarray):
-#         """
-#         slices: iterable of slice objects in flat nav
-#         buffer: np.ndarray[sig_chunk_size, nav_buffer_size]
-
-#         goal, for every row of buffer, read every slice into it
-#               in as few calls to readinto as possible
-#               will need to seek once per row of buffer to read a new
-#               sig pixel's worth of data
-#               the sum of slices will not necessarily fill a row
-#               but the caller will handle cropping later
-
-#         NOTE, if the nav_size_bytes is less than 4K, we can potentially read
-#         multiple rows in one read
-#         """
-#         row_offset = self._offset
-#         for row_idx in range(buffer.shape[0]):
-#             read_in = 0
-#             for sl in slices:
-#                 slice_offset = sl.start * self._itemsize
-#                 slice_length = (sl.stop - sl.start)
-#                 self._handle.seek(row_offset + slice_offset)
-#                 self._handle.readinto(buffer[row_idx, read_in: read_in + slice_length].data)
-#                 read_in += slice_length
-#             row_offset += self._blocksize
+    @staticmethod
+    def _sort_dict_int(kv):
+        """
+        Return first element of k is tuple if tuple else k
+        """
+        key, _ = kv
+        return key[0] if isinstance(key, tuple) else key
