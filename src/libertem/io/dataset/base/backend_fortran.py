@@ -446,7 +446,8 @@ class FortranReader:
         Generate (lower, upper) index integers which split length
         into chunks of size depth, including a final chunk <= depth
         """
-        assert length
+        if not (length > 0 and depth > 0):
+            raise ValueError('Cannot generate slices for non-positive length/depth')
         boundaries = [*range(0, length, depth)]
         if boundaries[-1] != length:
             boundaries.append(length)
