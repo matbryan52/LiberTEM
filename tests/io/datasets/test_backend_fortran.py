@@ -221,29 +221,35 @@ def test_flat_tile_slices(shapes, slices):
 def test_build_chunk_map1():
     chunk_schemes = [{4}, {5, 6}, {6}]
     chunk_map = FortranReader.build_chunk_map(chunk_schemes)
-    assert chunk_map == {0: {4}, 1: {5}, (1, 2): {6}}
+    assert chunk_map == {(0,): {4}, (1, 2): {5, 6}}
 
 
 def test_build_chunk_map2():
     chunk_schemes = [{0}]
     chunk_map = FortranReader.build_chunk_map(chunk_schemes)
-    assert chunk_map == {0: {0}}
+    assert chunk_map == {(0,): {0}}
 
 
 def test_build_chunk_map3():
-    chunk_schemes = [{1}, {4}, {10}, {4}]
-    chunk_map = FortranReader.build_chunk_map(chunk_schemes)
-    assert chunk_map == {0: {1}, (1, 3): {4}, 2: {10}}
-
-
-def test_build_chunk_map4():
     chunk_schemes = [{0}, {0}, {0}, {0}]
     chunk_map = FortranReader.build_chunk_map(chunk_schemes)
     assert chunk_map == {(0, 1, 2, 3): {0}}
 
 
+def test_build_chunk_map4():
+    chunk_schemes = [{0}, {1}, {7, 8}, {8}]
+    chunk_map = FortranReader.build_chunk_map(chunk_schemes)
+    assert chunk_map == {(0,): {0}, (1,): {1}, (2, 3): {7, 8}}
+
+
 def test_build_chunk_map_raises():
     chunk_schemes = [{}, {5, 6}, {6}]
+    with pytest.raises(ValueError):
+        FortranReader.build_chunk_map(chunk_schemes)
+
+
+def test_build_chunk_map_raises2():
+    chunk_schemes = [{1}, {4}, {10}, {4}]
     with pytest.raises(ValueError):
         FortranReader.build_chunk_map(chunk_schemes)
 
@@ -260,7 +266,10 @@ def _slice_intersects(sl0: slice, sl1: slice) -> bool:
 @pytest.mark.parametrize(
     "num_tiles", [1, 3, 13, 63],
 )
-def test_choose_chunks(ds_size_mb, num_tiles):
+@pytest.mark.parametrize(
+    "repeat", tuple(range(3)),
+)
+def test_choose_chunks(ds_size_mb, num_tiles, repeat):
     dtype = np.float32
     itemsize = np.dtype(dtype).itemsize
     ds_size = ds_size_mb * 2**20
