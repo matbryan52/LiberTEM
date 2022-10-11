@@ -64,6 +64,9 @@ class FortranReader:
         self._chunks = tuple((o, c) for o, c in zip(offsets, chunks))
         self._chunk_map = self.build_chunk_map(chunk_scheme_indices)
 
+        # (index of chunk currently mapped, None | np.memmap)
+        self._memmap = (-1, None)
+
     @staticmethod
     def verify_tiling(tiling_scheme: 'TilingScheme', shape: 'Shape', sig_order: Literal['F', 'C']):
         slices = tiling_scheme.slices_array
@@ -199,8 +202,13 @@ class FortranReader:
         offset, chunkshape = self._chunks[idx]
         return np.memmap(self._path, mode='r', offset=offset, dtype=self._dtype, shape=chunkshape)
 
-    def create_memmaps(self):
-        return [self.create_memmap(idx) for idx in range(len(self._chunks))]
+    def get_memmap(self, idx):
+        if self._memmap[0] != idx:
+            self._memmap = (idx, self.create_memmap(idx))
+        return self._memmap[1]
+
+    def close_memmap(self):
+        self._memmap = (-1, None)
 
     def _byte_size(self, shape: Iterable) -> int:
         return np.dtype(self._dtype).itemsize * np.prod(shape, dtype=np.int64)
@@ -272,41 +280,61 @@ class FortranReader:
                                                 *index_or_slice)
         out_buffer = np.empty((max_sig_block, buffer_length), dtype=self._dtype)
 
-        current_memmap_idx = -1
+        # Outer chunk loop accounts for needing to combine data
+        # from more than one chunk to build a tile/frame stack
         for chunks, scheme_indices in self._chunk_map.items():
+            # in normal tiled processing no combinations are necessary
+            # so fake a set of chunks from the single chunk index
             chunks = chunks if isinstance(chunks, tuple) else (chunks,)
+            # The tiling scheme slices are stored in whole-dataset coordinates
+            # but we read into a truncated buffer, this offset shifts the sig
+            # slice for this group of chunks into this truncated system
             buffer_sig_offset = chunk_offsets[chunks[0]]
+            # For a given set of chunks (or single chunk), perform all necessary reads
             for mmap_nav_slices, buffer_nav_slice, buffer_unpacks in reads:
+
+                # Phase 1: perform reads into buffer
                 sig_read = 0
                 for raw_idx in chunks:
+                    # If just reading from a single chunk to make a tile then
+                    # memmap is only created once per item in _chunk_map
+                    # If we are building tiles/frames from chunk combinations we have
+                    # to switch the memmap multiple times for each fill of the buffer
+                    # which is the worst-case for this layout (massive overheads),
+                    # this is necessary because Dask limits us to ~1GiB memmaps
+                    memmap = self.get_memmap(raw_idx)
                     sig_read_length = chunksizes[raw_idx]
-                    if current_memmap_idx != raw_idx:
-                        memmap = self.create_memmap(raw_idx)
-                        current_memmap_idx = raw_idx
-                    combined_slices = self._slice_combine_array(*mmap_nav_slices)
                     # The calls to _load_data could be threaded to parallise I/O and processing
                     self._load_data(
                         memmap,
-                        combined_slices,
+                        mmap_nav_slices,
                         out_buffer[sig_read: sig_read + sig_read_length,
                                    buffer_nav_slice],
                     )
                     sig_read += sig_read_length
 
+                # Phase 2: unpack buffer and yield tiles
                 for (unpack_nav_slice, idcs_in_flat_nav) in buffer_unpacks:
                     for scheme_index in scheme_indices:
-                        # flat_tile has dims (flat_sig, flat_nav)
                         flat_tile_slice = tile_slices[scheme_index]
-                        # Shift tile slice from whole sig buffer to partial sig buffer
+                        # Shift tile slice from whole sig buffer to truncated sig buffer
                         shifted_tile_slice = slice(flat_tile_slice.start - buffer_sig_offset,
                                                    flat_tile_slice.stop - buffer_sig_offset)
+                        # flat_tile has dims (flat_sig, flat_nav)
                         flat_tile = out_buffer[shifted_tile_slice,
                                                unpack_nav_slice]
+                        # reshape from flat tile to shape expected by UDF
                         tile_shape = tile_shapes[scheme_index] + flat_tile.shape[-1:]
                         tile = flat_tile.reshape(tile_shape, order=self._sig_order)
                         # must roll final axis to provide shape == (nav, *sig)
+                        # TODO benchmark how costly this is
                         tile = np.moveaxis(tile, -1, 0)
                         yield idcs_in_flat_nav, scheme_index, tile
+
+        # This class only exists for the duration of .get_tiles()
+        # so explicitly dereferencing the final memmap is not
+        # really necessary, but do it just in case
+        self.close_memmap()
 
     @classmethod
     def _plan_reads(cls,
@@ -424,6 +452,7 @@ class FortranReader:
         #     unpacks == (slice_in_buffer, tuple(int, ...) of flat_frame_idcs)
         for combination in combinations:
             mmap_slices = tuple(index_or_slice[i] for i in combination)
+            combined_slices = cls._slice_combine_array(*mmap_slices)
             # If we are just handling a single contig combination can optimise here by not
             # returning a frame index array but rather just a single nav slice object
             frame_idcs = itertools.chain(*tuple(range(slice_info[i][1], slice_info[i][2] + 1)
@@ -436,7 +465,7 @@ class FortranReader:
             unpacks = [(slice(lb, ub), frame_idcs[lb:ub])
                        for lb, ub
                        in cls._gen_slices_for_depth(read_length, ts_depth)]
-            reads.append((mmap_slices, buffer_allocation, unpacks))
+            reads.append((combined_slices, buffer_allocation, unpacks))
 
         return buffer_length, reads
 
