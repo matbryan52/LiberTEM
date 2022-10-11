@@ -258,7 +258,7 @@ class FortranReader:
         # max_tilesize = self._get_max_tilesize(self._tiling_scheme)
         chunksizes = tuple(s.stop - s.start for s in self._chunk_slices)
         combination_sizes = tuple(sum(chunksizes[kk] for kk in k) for k in self._chunk_combinations)
-        max_sig_block = max(*combination_sizes, *chunksizes)
+        max_sig_block = max(combination_sizes + chunksizes)
         # implicit max with the 1 + even if // rounds down to 0
         ideal_depth = 1 + self.BUFFER_SIZE // (max_sig_block * np.dtype(self._dtype).itemsize)
         buffer_length, reads = self._plan_reads(ideal_depth,
@@ -574,3 +574,81 @@ class FortranReader:
         boundaries = tuple(itertools.accumulate(tile_size, initial=0))
         return tuple(slice(a, b) for a, b
                      in zip(boundaries[:-1], boundaries[1:]))
+
+    # @contextlib.contextmanager
+    # def create_file_chunks(self):
+    #     with contextlib.ExitStack() as stack:
+    #         files = [stack.enter_context(
+    #                             FileChunk(
+    #                                 self._path,
+    #                                 chunkshape,
+    #                                 self._dtype,
+    #                                 offset,
+    #                             )
+    #                         )
+    #                  for offset, chunkshape in self._chunks]
+    #         yield files
+
+    # @staticmethod
+    # def _load_data_file(file_chunk: FileChunk,
+    #                     slices: Tuple[Iterable, slice],
+    #                     out_buf: np.ndarray,
+    #                     idx: int) -> int:
+    #     """
+    #     Read slices/values from memmap into out_buf sequentially in the last dimension
+
+    #     Return idx to allow tracking which memmap chunk(s) just completed
+    #     """
+    #     if any(not isinstance(s, slice) for s in slices):
+    #         raise NotImplementedError()
+    #     file_chunk.readinto(slices, out_buf)
+    #     return idx
+
+
+# class FileChunk:
+#     def __init__(self, path, chunk_shape, dtype, start_byte):
+#         self._path = path
+#         self._itemsize = np.dtype(dtype).itemsize
+#         self._blocksize = chunk_shape[-1] * self._itemsize
+#         self._offset = start_byte
+#         self._size = prod(chunk_shape) * self._itemsize
+#         self._handle = None
+
+#     def __enter__(self):
+#         self._handle = open(self._path, 'rb')
+#         return self
+
+#     def __exit__(self, *exc):
+#         try:
+#             self._handle.close()
+#         except OSError:
+#             pass
+
+#     def seek(self, *args, **kwargs):
+#         self._handle.seek(*args, **kwargs)
+
+#     def readinto(self, slices, buffer: np.ndarray):
+#         """
+#         slices: iterable of slice objects in flat nav
+#         buffer: np.ndarray[sig_chunk_size, nav_buffer_size]
+
+#         goal, for every row of buffer, read every slice into it
+#               in as few calls to readinto as possible
+#               will need to seek once per row of buffer to read a new
+#               sig pixel's worth of data
+#               the sum of slices will not necessarily fill a row
+#               but the caller will handle cropping later
+
+#         NOTE, if the nav_size_bytes is less than 4K, we can potentially read
+#         multiple rows in one read
+#         """
+#         row_offset = self._offset
+#         for row_idx in range(buffer.shape[0]):
+#             read_in = 0
+#             for sl in slices:
+#                 slice_offset = sl.start * self._itemsize
+#                 slice_length = (sl.stop - sl.start)
+#                 self._handle.seek(row_offset + slice_offset)
+#                 self._handle.readinto(buffer[row_idx, read_in: read_in + slice_length].data)
+#                 read_in += slice_length
+#             row_offset += self._blocksize
