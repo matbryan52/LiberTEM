@@ -150,7 +150,7 @@ def _generate_random_slices():
 
 
 def _expand_slices(*slices):
-    indices = tuple(i if isinstance(i, (np.integer, int))
+    indices = tuple(i if isinstance(i, (np.integer, int, list))
                     else range(i.start, i.stop)
                     for i in slices)
     return tuple(FortranReader._splat_iterables(*indices))
