@@ -280,10 +280,11 @@ class FortranReader:
                                                 *index_or_slice)
         out_buffer = np.empty((max_sig_block, buffer_length), dtype=self._dtype)
 
-        # Outer chunk loop accounts for needing to combine data
-        # from more than one chunk to build a tile/frame stack
+        # Outer chunk loop traverses all tiles in the tiling scheme
+        # chunks can be int | tuple[int, ...] mapping the chunks which need
+        # to be opened to provided the given scheme_indices
         for chunks, scheme_indices in self._chunk_map.items():
-            # in normal tiled processing no combinations are necessary
+            # in normal tiled processing no combinations are necessary (chunks == int)
             # so fake a set of chunks from the single chunk index
             chunks = chunks if isinstance(chunks, tuple) else (chunks,)
             # The tiling scheme slices are stored in whole-dataset coordinates
@@ -295,6 +296,8 @@ class FortranReader:
 
                 # Phase 1: perform reads into buffer
                 sig_read = 0
+                # Inner chunk loop accounts for needing to combine data
+                # from more than one chunk to build a tile/frame stack
                 for raw_idx in chunks:
                     # If just reading from a single chunk to make a tile then
                     # memmap is only created once per item in _chunk_map
