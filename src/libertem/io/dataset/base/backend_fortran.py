@@ -285,7 +285,7 @@ class FortranReader:
                         out_buffer[sig_read: sig_read + sig_read_length,
                                    buffer_nav_slice],
                     )
-                sig_read += sig_read_length
+                    sig_read += sig_read_length
 
                 for (unpack_nav_slice, idcs_in_flat_nav) in buffer_unpacks:
                     for scheme_index in scheme_indices:
