@@ -22,6 +22,7 @@ if typing.TYPE_CHECKING:
     from numpy import typing as nt
     from libertem.io.dataset.base.tiling_scheme import TilingScheme
     from libertem.executor.base import JobExecutor
+    from libertem.io.corrections.corrset import CorrectionSet
 
 
 class DM4DatasetParams(MessageConverter):
@@ -334,6 +335,19 @@ class DM4DataSet(DataSet):
         # bytesize to that proposed by the Negotiator
         final_dim = max(1, prod(sig_tile) // prod(sig_stub))
         return (depth,) + (final_dim,) + sig_stub
+
+    def need_decode(
+        self,
+        read_dtype: "nt.DTypeLike",
+        roi: Optional[np.ndarray],
+        corrections: Optional['CorrectionSet'],
+    ) -> bool:
+        if self._array_c_ordered:
+            return super().need_decode(read_dtype, roi, corrections)
+        else:
+            # Not strictly true but the strange layout means
+            # read performance is the limiting factor
+            return True
 
 
 class DM4FileSet(FileSet):
