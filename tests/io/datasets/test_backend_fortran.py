@@ -109,6 +109,7 @@ def test_slice_combine_array(seq, result):
     "ideal_depth, ts_depth, sl",
     [
         (1, 3, slice(5, 100)),
+        (64, 8, slice(0, 250)),
         (16, 1, slice(5, 6)),
         (16, 8, slice(5, 6)),
     ],
@@ -117,11 +118,11 @@ def test_plan_reads_buffer_length(ideal_depth, ts_depth, sl):
     buffer_length, _ = FortranReader._plan_reads(ideal_depth,
                                                  ts_depth,
                                                  sl)
-    if (sl.stop - sl.start) <= ts_depth:
-        assert buffer_length == (sl.stop - sl.start)
-    else:
-        assert buffer_length >= ts_depth
-        assert (buffer_length % ts_depth) == 0
+    to_read = sl.stop - sl.start
+    # Never buffer more than we need to read in the partition
+    assert 0 < buffer_length <= to_read
+    # Either we buffer the whole slice/part or we buffer a multiple of ts_depth
+    assert (buffer_length % ts_depth) == 0 or buffer_length == to_read
 
 
 def _generate_random_slices():
