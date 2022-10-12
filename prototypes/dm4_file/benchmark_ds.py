@@ -4,6 +4,7 @@ import contextlib
 import numpy as np
 import time
 import tqdm
+import click
 
 import libertem.api as lt
 from libertem.common.math import prod
@@ -63,26 +64,33 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
     true_size_mb = prod(nav_shape + sig_shape) * itemsize / 2**20
     return nav_shape, sig_shape, true_size_mb
 
-def main():
-    ctx = lt.Context.make_with('inline')
 
-    ds_size_mb = 4096
-    sig_size = 1
+@click.command()
+@click.option('-d', '--ds_size_mb', help='dataset size',
+              default=1024, type=int, show_default=True)
+@click.option('-s', '--sig_size_mb', help='signal size',
+              default=1, type=int)
+@click.option('-r', '--repeats', help='number of runs',
+              default=10, type=int)
+@click.option('--warm',
+              help="warm cache",
+              default=False, is_flag=True)
+def main(ds_size_mb, sig_size_mb, repeats, warm):
+    ctx = lt.Context.make_with('inline')
     dtype = np.float32
     roi = None
     corrections = None
     udf_class = SumSigUDF
 
-    repeats = 10
-    drop_caches = False
+    drop_caches = not warm
 
-    nav_shape, sig_shape, true_size_mb = get_ds_shape(ds_size_mb, sig_size, dtype)
-    print(f'{nav_shape}, {sig_shape}, {str(np.dtype(np.float32))}, {true_size_mb:.1f} MB')
+    nav_shape, sig_shape, true_size_mb = get_ds_shape(ds_size_mb, sig_size_mb, dtype)
+    print(f'{nav_shape}, {sig_shape}, {str(np.dtype(np.float32))}, {true_size_mb:.1f} MB), warm caches: {warm}')
     print('Creating data...', end='', flush=True)
     tstart = time.perf_counter()
 
     with get_data(nav_shape, sig_shape, dtype) as path:
-        print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s)')
+        print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s')
         ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape, dtype=dtype)
         ds.initialize(ctx.executor)
         udf = udf_class()
@@ -112,4 +120,4 @@ def main():
 
 
 if __name__ == '__main__':
-    runs = main()
+    main()
