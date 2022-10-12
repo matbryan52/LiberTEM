@@ -1,3 +1,6 @@
+import os
+os.environ["KMP_WARNINGS"] = "off"
+
 import pathlib
 import tempfile
 import contextlib
@@ -5,8 +8,6 @@ import numpy as np
 import time
 import tqdm
 import click
-import os
-os.environ("KMP_WARNINGS") = "off"
 
 import libertem.api as lt
 from libertem.common.math import prod
