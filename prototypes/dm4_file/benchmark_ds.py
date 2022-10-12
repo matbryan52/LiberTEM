@@ -5,6 +5,8 @@ import numpy as np
 import time
 import tqdm
 import click
+import os
+os.environ("KMP_WARNINGS") = "off"
 
 import libertem.api as lt
 from libertem.common.math import prod
@@ -90,7 +92,7 @@ def main(ds_size_mb, sig_size_mb, repeats, warm):
     tstart = time.perf_counter()
 
     with get_data(nav_shape, sig_shape, dtype) as path:
-        print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s')
+        print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s)')
         ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape, dtype=dtype)
         ds.initialize(ctx.executor)
         udf = udf_class()
