@@ -28,9 +28,10 @@ class SumFrameUDF(UDF):
 
 
 class RawDM4Like(RawFileDataSet):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, num_part=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._array_c_ordered = False
+        self._num_part = num_part
 
     def get_partitions(self):
         return DM4DataSet.get_partitions(self)
@@ -40,6 +41,12 @@ class RawDM4Like(RawFileDataSet):
 
     def need_decode(self, *args, **kwargs):
         return DM4DataSet.need_decode(self, *args, **kwargs)
+
+    def get_num_partitions(self) -> int:
+        if self._num_part is not None:
+            return self._num_part
+        else:
+            return super().get_num_partitions()
 
 
 @contextlib.contextmanager
@@ -75,10 +82,12 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
               default=1, type=int)
 @click.option('-r', '--repeats', help='number of runs',
               default=10, type=int)
+@click.option('-n', '--num_part', help='number of partitions',
+              default=None, type=int)
 @click.option('--warm',
               help="warm cache",
               default=False, is_flag=True)
-def main(ds_size_mb, sig_size_mb, repeats, warm):
+def main(ds_size_mb, sig_size_mb, repeats, warm, num_part):
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
     roi = None
@@ -94,7 +103,7 @@ def main(ds_size_mb, sig_size_mb, repeats, warm):
 
     with get_data(nav_shape, sig_shape, dtype) as path:
         print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s)')
-        ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape, dtype=dtype)
+        ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape, dtype=dtype, num_part=num_part)
         ds.initialize(ctx.executor)
         udf = udf_class()
 
