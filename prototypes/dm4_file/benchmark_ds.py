@@ -96,7 +96,7 @@ def main(ds_size_mb, sig_size_mb, repeats, warm):
         udf = udf_class()
 
         tasks, params = UDFRunner([udf])._prepare_run_for_dataset(ds, ctx.executor, roi, corrections, None, False)
-        print(f'Num partitions {len(tasks)}, {udf.__class__.__name__}')
+        print(f'Num partitions {len(tasks)}, {udf.__class__.__name__}, {ctx.executor.__class__.__name__}')
         print(f'{params.tiling_scheme}, {params.tiling_scheme.intent}')
 
         runs = []
