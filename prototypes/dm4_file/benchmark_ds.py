@@ -13,6 +13,7 @@ import libertem.api as lt
 from libertem.common.math import prod
 from libertem.io.dataset.raw import RawFileDataSet
 from libertem.io.dataset.dm4 import DM4DataSet
+from libertem.io.dataset.base.backend_fortran import FortranReader
 from libertem.udf.sumsigudf import SumSigUDF
 from libertem.udf.base import UDF, UDFRunner
 
@@ -62,6 +63,24 @@ def get_data(nav_shape, sig_shape, dtype):
         yield path
 
 
+@contextlib.contextmanager
+def adapt_param(obj, param, value):
+    oldval = getattr(obj, param)
+    setattr(obj, param, value)
+    yield
+    setattr(obj, param, oldval)
+
+
+@contextlib.contextmanager
+def adapt_params(obj, mods):
+    with contextlib.ExitStack() as stack:
+        for param, value in mods.items():
+            if value is None:
+                continue
+            stack.enter_context(adapt_param(obj, param, value))
+        yield
+
+
 def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
     itemsize = np.dtype(dtype).itemsize
     sig_dim = np.sqrt(sig_size_mb * 2**20 / itemsize)
@@ -84,15 +103,32 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
               default=10, type=int)
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
+@click.option('-n', '--num_part', help='number of partitions',
+              default=None, type=int)
+@click.option('-n', '--num_part', help='number of partitions',
+              default=None, type=int)
+@click.option('--combine', default=None, type=int)
+@click.option('--memmap', default=None, type=int)
+@click.option('--buffer', default=None, type=int)
 @click.option('--warm',
               help="warm cache",
               default=False, is_flag=True)
-def main(ds_size_mb, sig_size_mb, repeats, warm, num_part):
+def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
+         combine, memmap, buffer):
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
     roi = None
     corrections = None
     udf_class = SumSigUDF
+
+    mods = {
+        'MAX_MEMMAP_SIZE': memmap,
+        'BUFFER_SIZE': buffer,
+        'THRESHOLD_COMBINE': combine,
+    }
+    for key in mods.keys():
+        if 'SIZE' in key and mods[key] is not None:
+            mods[key] = mods[key] * 2 ** 20
 
     drop_caches = not warm
 
@@ -103,27 +139,28 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part):
 
     with get_data(nav_shape, sig_shape, dtype) as path:
         print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s)')
-        ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape, dtype=dtype, num_part=num_part)
-        ds.initialize(ctx.executor)
-        udf = udf_class()
+        with adapt_params(FortranReader, mods):
+            ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape, dtype=dtype, num_part=num_part)
+            ds.initialize(ctx.executor)
+            udf = udf_class()
 
-        tasks, params = UDFRunner([udf])._prepare_run_for_dataset(ds, ctx.executor, roi, corrections, None, False)
-        print(f'Num partitions {len(tasks)}, {udf.__class__.__name__}, {ctx.executor.__class__.__name__}')
-        print(f'{params.tiling_scheme}, {params.tiling_scheme.intent}')
-        # Warmup .pyc / numba etc
-        res = ctx.run_udf(dataset=ds, udf=udf, roi=roi, corrections=corrections)
-
-        runs = []
-        for _ in tqdm.trange(repeats):
-            if drop_caches:
-                drop_cache([str(path)])
-            else:
-                warmup_cache([str(path)])
-            tstart = time.perf_counter()
+            tasks, params = UDFRunner([udf])._prepare_run_for_dataset(ds, ctx.executor, roi, corrections, None, False)
+            print(f'Num partitions {len(tasks)}, {udf.__class__.__name__}, {ctx.executor.__class__.__name__}')
+            print(f'{params.tiling_scheme}, {params.tiling_scheme.intent}')
+            # Warmup .pyc / numba etc
             res = ctx.run_udf(dataset=ds, udf=udf, roi=roi, corrections=corrections)
-            runs.append(time.perf_counter() - tstart)
 
-        assert res['intensity'].data[0, 0] == 0
+            runs = []
+            for _ in tqdm.trange(repeats):
+                if drop_caches:
+                    drop_cache([str(path)])
+                else:
+                    warmup_cache([str(path)])
+                tstart = time.perf_counter()
+                res = ctx.run_udf(dataset=ds, udf=udf, roi=roi, corrections=corrections)
+                runs.append(time.perf_counter() - tstart)
+
+            assert res['intensity'].data[0, 0] == 0
 
     runs = np.asarray(runs)
     print(f'Average of {repeats} runs, mean {runs.mean():.2f} s, '
