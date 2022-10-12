@@ -29,16 +29,34 @@ class SumFrameUDF(UDF):
 
 
 class RawDM4Like(RawFileDataSet):
-    def __init__(self, *args, num_part=None, **kwargs):
+    def __init__(self, *args, num_part=None, tileshape=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._array_c_ordered = False
         self._num_part = num_part
+        self._tileshape = tileshape
 
     def get_partitions(self):
         return DM4DataSet.get_partitions(self)
 
     def adjust_tileshape(self, *args, **kwargs):
-        return DM4DataSet.adjust_tileshape(self, *args, **kwargs)
+        if self._tileshape is None:
+            return DM4DataSet.adjust_tileshape(self, *args, **kwargs)
+        if isinstance(self._tileshape, str):
+            tileshape = eval(self._tileshape)
+        else:
+            tileshape = self._tileshape
+        assert len(tileshape) == 3
+        shape = []
+        for dim_idx, (tile_dim, shape_dim) in enumerate(zip(tileshape, self.shape.flatten_nav())):
+            if tile_dim is None:
+                if dim_idx == 0:
+                    max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
+                    shape.append(max_depth)
+                else:
+                    shape.append(shape_dim)
+            else:
+                shape.append(tile_dim)
+        return tuple(shape)
 
     def need_decode(self, *args, **kwargs):
         return DM4DataSet.need_decode(self, *args, **kwargs)
@@ -101,20 +119,17 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
               default=1, type=int)
 @click.option('-r', '--repeats', help='number of runs',
               default=10, type=int)
-@click.option('-n', '--num_part', help='number of partitions',
-              default=None, type=int)
-@click.option('-n', '--num_part', help='number of partitions',
-              default=None, type=int)
+@click.option('--warm',
+              help="warm cache",
+              default=False, is_flag=True)
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
 @click.option('--combine', default=None, type=int)
 @click.option('--memmap', default=None, type=int)
 @click.option('--buffer', default=None, type=int)
-@click.option('--warm',
-              help="warm cache",
-              default=False, is_flag=True)
+@click.option('--tileshape', default=None, type=str)
 def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
-         combine, memmap, buffer):
+         combine, memmap, buffer, tileshape):
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
     roi = None
@@ -140,7 +155,8 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
     with get_data(nav_shape, sig_shape, dtype) as path:
         print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s)')
         with adapt_params(FortranReader, mods):
-            ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape, dtype=dtype, num_part=num_part)
+            ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape,
+                            dtype=dtype, num_part=num_part, tileshape=tileshape)
             ds.initialize(ctx.executor)
             udf = udf_class()
 
