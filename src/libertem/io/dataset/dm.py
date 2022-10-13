@@ -63,6 +63,21 @@ class DMFileSet(FileSet):
 
 
 class DMDataSet(DataSet):
+    def __new__(cls, *args, **kwargs):
+        # delayed here to avoid circular reference
+        from .dm_single import SingleDMDataSet
+        if 'path' in kwargs:
+            subclass = SingleDMDataSet
+        elif 'files' in kwargs:
+            subclass = StackedDMDataSet
+        elif args and isinstance(args[0], (list, tuple)):
+            subclass = StackedDMDataSet
+        else:
+            subclass = SingleDMDataSet
+        return super().__new__(subclass)
+
+
+class StackedDMDataSet(DMDataSet):
     """
     Reader for stacks of DM3/DM4 files.
 

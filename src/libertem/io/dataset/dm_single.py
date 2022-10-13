@@ -66,7 +66,7 @@ class DM4DatasetParams(MessageConverter):
         return data
 
 
-class DM4DataSet(DMDataSet):
+class SingleDMDataSet(DMDataSet):
     """
     Reader for a single DM3/DM4 file
 
