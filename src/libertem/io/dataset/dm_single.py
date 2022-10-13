@@ -9,10 +9,8 @@ import numpy as np
 from libertem.common.math import prod
 from libertem.common import Shape, Slice
 from libertem.io.dataset.base.tiling import DataTile
-from .base import (
-    FileSet, BasePartition, DataSetException, DataSetMeta, File,
-)
-from .dm import DMDataSet, SingleDMDatasetParams
+from .base import BasePartition, DataSetException, DataSetMeta, File
+from .dm import DMDataSet, SingleDMDatasetParams, DMFileSet
 from libertem.io.dataset.base.backend_fortran import FortranReader
 
 log = logging.getLogger(__name__)
@@ -273,8 +271,8 @@ class SingleDMDataSet(DMDataSet):
         return self
 
     def _get_fileset(self):
-        return DM4FileSet([
-            DM4File(
+        return DMFileSet([
+            DMFile(
                 path=self._path,
                 start_idx=0,
                 end_idx=self._image_count,
@@ -285,7 +283,7 @@ class SingleDMDataSet(DMDataSet):
         ])
 
     def get_partitions(self):
-        partition_cls = DM4Partition if self._array_c_ordered else DM4PartitionFortran
+        partition_cls = DMPartition if self._array_c_ordered else DM4PartitionFortran
         fileset = self._get_fileset()
         for part_slice, start, stop in self.get_slices():
             yield partition_cls(
@@ -348,15 +346,11 @@ class SingleDMDataSet(DMDataSet):
             return True
 
 
-class DM4FileSet(FileSet):
-    pass
-
-
-class DM4File(File):
+class DMFile(File):
     ...
 
 
-class DM4Partition(BasePartition):
+class DMPartition(BasePartition):
     ...
 
 
@@ -368,7 +362,7 @@ class RawPartitionFortran(BasePartition):
             return
 
         assert len(self._fileset) == 1
-        file: DM4File = self._fileset[0]
+        file: DMFile = self._fileset[0]
 
         dest_dtype = np.dtype(dest_dtype)
         tiling_scheme_adj = tiling_scheme.adjust_for_partition(self)
