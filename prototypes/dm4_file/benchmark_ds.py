@@ -29,7 +29,7 @@ class SumFrameUDF(UDF):
 
 
 class RawDM4Like(RawFileDataSet):
-    def __init__(self, *args, num_part=None, tileshape=None, max_io=None, **kwargs):
+    def __init__(self, *args, num_part=None, tileshape=None, max_io=1, **kwargs):
         super().__init__(*args, **kwargs)
         self._array_c_ordered = False
         self._num_part = num_part
@@ -46,23 +46,39 @@ class RawDM4Like(RawFileDataSet):
             tileshape = eval(self._tileshape)
         else:
             tileshape = self._tileshape
-        assert len(tileshape) == 3
         shape = []
         max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
-        for dim_idx, (tile_dim, shape_dim) in enumerate(zip(tileshape, self.shape.flatten_nav())):
-            if tile_dim is None:
-                if dim_idx == 0:
-                    shape.append(max_depth)
+        if isinstance(tileshape, tuple):
+            assert len(tileshape) == 3
+            for dim_idx, (tile_dim, shape_dim) in enumerate(zip(tileshape, self.shape.flatten_nav())):
+                if tile_dim is None:
+                    if dim_idx == 0:
+                        shape.append(max_depth)
+                    else:
+                        shape.append(shape_dim)
+                elif isinstance(tile_dim, float):
+                    if dim_idx == 0:
+                        shape.append(max(1, int(tile_dim * max_depth)))
+                    else:
+                        shape.append(max(1, int(tile_dim * shape_dim)))
                 else:
-                    shape.append(shape_dim)
-            elif isinstance(tile_dim, float):
-                if dim_idx == 0:
-                    shape.append(max(1, int(tile_dim * max_depth)))
-                else:
-                    shape.append(max(1, int(tile_dim * shape_dim)))
+                    shape.append(tile_dim)
+            return tuple(shape)
+        else:
+            assert isinstance(tileshape, int)
+            depth = min(max_depth, tileshape)
+            max_io_size = self.get_max_io_size()
+            itemsize = np.dtype(self.meta.raw_dtype).itemsize
+            sig_pix = max_io_size // (depth * itemsize)
+            if sig_pix == 0:
+                depth = max_io_size // itemsize
+                sig_pix = 1
+            rows, cols = self.shape.sig
+            if sig_pix < cols:
+                shape = (depth, 1, sig_pix)
             else:
-                shape.append(tile_dim)
-        return tuple(shape)
+                shape = (depth, max(rows // sig_pix, 1), cols)
+            return shape
 
     def need_decode(self, *args, **kwargs):
         return DM4DataSet.need_decode(self, *args, **kwargs)
@@ -137,7 +153,7 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
 @click.option('--max_io', help='max_io_size mb',
-              default=None, type=int)
+              default=1, type=int)
 @click.option('--combine', default=None, type=int)
 @click.option('--memmap', default=None, type=int)
 @click.option('--buffer', default=None, type=int)
