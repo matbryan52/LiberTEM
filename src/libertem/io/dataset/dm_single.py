@@ -11,7 +11,7 @@ from libertem.common import Shape, Slice
 from libertem.io.dataset.base.tiling import DataTile
 from .base import BasePartition, DataSetException, DataSetMeta, File
 from .dm import DMDataSet, SingleDMDatasetParams, DMFileSet
-from libertem.io.dataset.base.backend_fortran import FortranReader
+from .dm_single_reader import FortranReader
 
 log = logging.getLogger(__name__)
 

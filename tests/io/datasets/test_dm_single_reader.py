@@ -6,7 +6,7 @@ import pytest
 from libertem.common.math import prod
 from libertem.common.shape import Shape
 from libertem.io.dataset.base.tiling_scheme import TilingScheme
-from libertem.io.dataset.base.backend_fortran import FortranReader
+from libertem.io.dataset.dm_single_reader import FortranReader
 
 
 @pytest.mark.parametrize(
