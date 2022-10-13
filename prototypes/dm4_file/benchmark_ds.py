@@ -65,7 +65,9 @@ class RawDM4Like(RawFileDataSet):
                     shape.append(tile_dim)
             return tuple(shape)
         else:
-            assert isinstance(tileshape, int)
+            assert isinstance(tileshape, (int, float))
+            if isinstance(tileshape, float):
+                tileshape = max(1, int(max_depth * tileshape))
             depth = min(max_depth, tileshape)
             max_io_size = self.get_max_io_size()
             itemsize = np.dtype(self.meta.raw_dtype).itemsize
