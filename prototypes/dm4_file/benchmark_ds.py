@@ -1,6 +1,8 @@
 import os
 os.environ["KMP_WARNINGS"] = "off"
 
+import datetime
+import json
 import pathlib
 import tempfile
 import contextlib
@@ -168,6 +170,21 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
 @click.option('--tileshape', default=None, type=str)
 def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
          combine, memmap, buffer, tileshape, max_io, roi, frame):
+
+    trace = {'inputs': {}, 'run': {}, 'results': {}}
+    trace['inputs']['ds_size_mb'] = ds_size_mb
+    trace['inputs']['sig_size_mb'] = sig_size_mb
+    trace['inputs']['repeats'] = repeats
+    trace['inputs']['warm'] = warm
+    trace['inputs']['num_part'] = num_part
+    trace['inputs']['combine'] = combine
+    trace['inputs']['memmap'] = memmap
+    trace['inputs']['buffer'] = buffer
+    trace['inputs']['tileshape'] = tileshape
+    trace['inputs']['max_io'] = max_io
+    trace['inputs']['roi'] = roi
+    trace['inputs']['frame'] = frame
+
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
     corrections = None
@@ -212,6 +229,20 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
             # Warmup .pyc / numba etc
             res = ctx.run_udf(dataset=ds, udf=udf, roi=roi_a, corrections=corrections)
 
+            trace['run']['nav_shape'] = nav_shape
+            trace['run']['sig_shape'] = sig_shape
+            trace['run']['dtype'] = str(np.dtype(dtype))
+            trace['run']['true_size_mb'] = true_size_mb
+            trace['run']['udf_name'] = udf.__class__.__name__
+            trace['run']['executor'] = ctx.executor.__class__.__name__
+            trace['run']['num_part'] = len(tasks)
+            trace['run']['reader'] = {k: getattr(FortranReader, k) for k in mods.keys()}
+            trace['run']['tiling'] = {}
+            trace['run']['tiling']['depth'] = params.tiling_scheme.depth
+            trace['run']['tiling']['length'] = len(params.tiling_scheme)
+            unique_shapes = list({tuple(slice_.shape) for slice_ in params.tiling_scheme._slices})
+            trace['run']['tiling']['shapes'] = unique_shapes
+
             runs = []
             for _ in tqdm.trange(repeats):
                 if drop_caches:
@@ -224,12 +255,26 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
 
             assert res['intensity'].data[0, 0] == 0
 
+    trace['results']['raw'] = runs
+
     runs = np.asarray(runs)
     print(f'Average of {repeats} runs, mean {runs.mean():.2f} s, '
           f'min-max ({runs.min():.2f}, {runs.max():.2f}) s')
     print(f'Processing speed (mean) {true_size_mb / runs.mean():.1f} MB/s, '
           f'cache: {"cold" if drop_caches else "warm"}')
-    return runs
+
+    trace['results']['stats'] = {}
+    trace['results']['stats']['mean'] = runs.mean()
+    trace['results']['stats']['min'] = runs.min()
+    trace['results']['stats']['max'] = runs.max()
+    trace['results']['stats']['speed_mbs'] = true_size_mb / runs.mean()
+
+    out_dir = pathlib.Path(__file__).parent / 'results'
+    out_dir.mkdir(exist_ok=True)
+    with (out_dir / f'{datetime.datetime.now().isoformat(sep="_", timespec="seconds")}.json').open('w') as fp:
+        json.dump(trace, fp, indent=2)
+
+    return trace
 
 
 if __name__ == '__main__':
