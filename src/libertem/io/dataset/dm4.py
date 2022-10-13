@@ -11,9 +11,10 @@ from libertem.common import Shape, Slice
 from libertem.common.messageconverter import MessageConverter
 from libertem.io.dataset.base.tiling import DataTile
 from .base import (
-    DataSet, FileSet, BasePartition, DataSetException, DataSetMeta,
+    FileSet, BasePartition, DataSetException, DataSetMeta,
     File, IOBackend,
 )
+from .dm import DMDataSet
 from libertem.io.dataset.base.backend_fortran import FortranReader
 
 log = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ class DM4DatasetParams(MessageConverter):
         return data
 
 
-class DM4DataSet(DataSet):
+class DM4DataSet(DMDataSet):
     """
     Reader for a single DM3/DM4 file
 
