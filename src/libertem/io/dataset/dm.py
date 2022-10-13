@@ -104,6 +104,22 @@ class DMFileSet(FileSet):
 
 
 class DMDataSet(DataSet):
+    """
+    Factory class for DigitalMicrograph file datasets
+
+     - Passing either the :code:`files` kwarg or a tuple/list as first
+       argument will create an instance of :class:`StackedDMDataSet`
+     - Passing either the :code:`path` kwarg or any other object
+       as first argument will create a :class:`SingleDMDataSet`
+
+    This class is necessary to handle the difference in signatures and
+    behaviours of the two DM dataset implementations, but these may
+    later be fused if a markup format for multi-file datasets is implemented
+
+    This class implements the methods necessary to expose a DMDataSet in
+    the web GUI, which it does by deferring to SingleDMDataSet. At this
+    time multi-file datasets are not supported in the UI.
+    """
     def __new__(cls, *args, **kwargs):
         # delayed here to avoid circular reference
         from .dm_single import SingleDMDataSet
