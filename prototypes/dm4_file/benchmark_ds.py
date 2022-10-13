@@ -29,11 +29,12 @@ class SumFrameUDF(UDF):
 
 
 class RawDM4Like(RawFileDataSet):
-    def __init__(self, *args, num_part=None, tileshape=None, **kwargs):
+    def __init__(self, *args, num_part=None, tileshape=None, max_io=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._array_c_ordered = False
         self._num_part = num_part
         self._tileshape = tileshape
+        self._max_io = max_io
 
     def get_partitions(self):
         return DM4DataSet.get_partitions(self)
@@ -47,13 +48,18 @@ class RawDM4Like(RawFileDataSet):
             tileshape = self._tileshape
         assert len(tileshape) == 3
         shape = []
+        max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
         for dim_idx, (tile_dim, shape_dim) in enumerate(zip(tileshape, self.shape.flatten_nav())):
             if tile_dim is None:
                 if dim_idx == 0:
-                    max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
                     shape.append(max_depth)
                 else:
                     shape.append(shape_dim)
+            elif isinstance(tile_dim, float):
+                if dim_idx == 0:
+                    shape.append(max(1, int(tile_dim * max_depth)))
+                else:
+                    shape.append(max(1, int(tile_dim * shape_dim)))
             else:
                 shape.append(tile_dim)
         return tuple(shape)
@@ -66,6 +72,12 @@ class RawDM4Like(RawFileDataSet):
             return self._num_part
         else:
             return super().get_num_partitions()
+
+    def get_max_io_size(self):
+        if self._max_io is not None:
+            return self._max_io * 2**20
+        else:
+            return self._max_io
 
 
 @contextlib.contextmanager
@@ -124,12 +136,14 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
               default=False, is_flag=True)
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
+@click.option('--max_io', help='max_io_size mb',
+              default=None, type=int)
 @click.option('--combine', default=None, type=int)
 @click.option('--memmap', default=None, type=int)
 @click.option('--buffer', default=None, type=int)
 @click.option('--tileshape', default=None, type=str)
 def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
-         combine, memmap, buffer, tileshape):
+         combine, memmap, buffer, tileshape, max_io):
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
     roi = None
@@ -156,7 +170,8 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
         print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s)')
         with adapt_params(FortranReader, mods):
             ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape,
-                            dtype=dtype, num_part=num_part, tileshape=tileshape)
+                            dtype=dtype, num_part=num_part, tileshape=tileshape,
+                            max_io=max_io)
             ds.initialize(ctx.executor)
             udf = udf_class()
 
