@@ -10,6 +10,7 @@ import numpy as np
 import time
 import tqdm
 import click
+import socket
 
 import libertem.api as lt
 from libertem.common.math import prod
@@ -108,7 +109,8 @@ class RawDM4Like(RawFileDataSet):
 def get_data(nav_shape, sig_shape, dtype):
     nav_size = prod(nav_shape)
     sig_size = prod(sig_shape)
-    with tempfile.TemporaryDirectory() as tempdir:
+    dir = '/cachedata/mat/' if socket.gethostname() == 'ptycho' else None
+    with tempfile.TemporaryDirectory(dir=dir) as tempdir:
         path = pathlib.Path(tempdir) / 'data.raw'
         vec: np.ndarray = np.linspace(0., 1., num=nav_size, endpoint=True, dtype=dtype)
         with path.open('wb') as fp:
