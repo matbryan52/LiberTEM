@@ -9,7 +9,7 @@ from libertem.io.dataset.base.exceptions import DataSetException
 from libertem.io.dataset.base.tiling_scheme import TilingScheme
 from libertem.udf.base import UDF
 from libertem.udf.sumsigudf import SumSigUDF
-from libertem.io.dataset.dm4 import DM4DataSet, DM4PartitionFortran
+from libertem.io.dataset.dm_single import SingleDMDataSet, DM4PartitionFortran
 
 from utils import ValidationUDF, _mk_random, dataset_correction_verification
 
@@ -126,7 +126,7 @@ def test_comparison(monkeypatch, dm4_mockfile, lt_ctx_fast, request):
     (array, filename), mock_fileDM = request.getfixturevalue(dm4_mockfile)
     _patch_filedm(monkeypatch, mock_fileDM)
 
-    ds = lt_ctx_fast.load('dm4', filename)
+    ds = lt_ctx_fast.load('dm', filename)
     assert ds.meta.shape.to_tuple() == array.shape
     flat_data = array.reshape(-1, *array.shape[-2:])
     udf = ValidationUDF(reference=flat_data)
@@ -140,7 +140,7 @@ def test_comparison_roi(monkeypatch, dm4_mockfile, lt_ctx_fast, request):
     (array, filename), mock_fileDM = request.getfixturevalue(dm4_mockfile)
     _patch_filedm(monkeypatch, mock_fileDM)
 
-    ds = lt_ctx_fast.load('dm4', filename)
+    ds = lt_ctx_fast.load('dm', filename)
     assert ds.meta.shape.to_tuple() == array.shape
 
     roi = np.random.choice(
@@ -161,7 +161,7 @@ def test_many_tiles(monkeypatch, dm4_mockfile, lt_ctx_fast, request):
     (array, filename), mock_fileDM = request.getfixturevalue(dm4_mockfile)
     _patch_filedm(monkeypatch, mock_fileDM)
 
-    ds = lt_ctx_fast.load('dm4', filename)
+    ds = lt_ctx_fast.load('dm', filename)
     ds.set_num_cores(8)
     _, _, sy, sx = array.shape
     flat_data = array.reshape(-1, sy, sx)
@@ -197,7 +197,7 @@ def test_process_frame(monkeypatch, dm4_mockfile, lt_ctx_fast, with_roi, request
     (array, filename), mock_fileDM = request.getfixturevalue(dm4_mockfile)
     _patch_filedm(monkeypatch, mock_fileDM)
 
-    ds = lt_ctx_fast.load('dm4', filename)
+    ds = lt_ctx_fast.load('dm', filename)
     result = array.sum(axis=(2, 3))
 
     if with_roi:
@@ -223,7 +223,7 @@ def test_corrections_default(monkeypatch, dm4_mockfile, lt_ctx_fast, with_roi, r
     (array, filename), mock_fileDM = request.getfixturevalue(dm4_mockfile)
     _patch_filedm(monkeypatch, mock_fileDM)
 
-    ds = lt_ctx_fast.load('dm4', filename)
+    ds = lt_ctx_fast.load('dm', filename)
 
     if with_roi:
         roi = np.zeros(ds.shape.nav, dtype=bool)
@@ -241,7 +241,7 @@ def test_macrotile_normal(monkeypatch, dm4_mockfile, lt_ctx_fast, request):
     (array, filename), mock_fileDM = request.getfixturevalue(dm4_mockfile)
     _patch_filedm(monkeypatch, mock_fileDM)
 
-    ds = lt_ctx_fast.load('dm4', filename)
+    ds = lt_ctx_fast.load('dm', filename)
     ds.set_num_cores(4)
 
     ps = ds.get_partitions()
@@ -259,7 +259,7 @@ def test_macrotile_roi(monkeypatch, dm4_mockfile, lt_ctx_fast, request):
     (array, filename), mock_fileDM = request.getfixturevalue(dm4_mockfile)
     _patch_filedm(monkeypatch, mock_fileDM)
 
-    ds = lt_ctx_fast.load('dm4', filename)
+    ds = lt_ctx_fast.load('dm', filename)
 
     roi = np.zeros(ds.shape.nav, dtype=bool)
     roi[0, 5] = 1
@@ -279,8 +279,8 @@ def test_positive_sync_offset(monkeypatch, dm4_mockfile, lt_ctx, request):
     udf = SumSigUDF()
     sync_offset = 2
 
-    ds_no_offset = lt_ctx.load('dm4', filename)
-    ds_with_offset = DM4DataSet(
+    ds_no_offset = lt_ctx.load('dm', filename)
+    ds_with_offset = SingleDMDataSet(
         path=filename,
         sync_offset=sync_offset,
     )
@@ -333,8 +333,8 @@ def test_negative_sync_offset(monkeypatch, dm4_mockfile, lt_ctx, request):
     udf = SumSigUDF()
     sync_offset = -2
 
-    ds_no_offset = lt_ctx.load('dm4', filename)
-    ds_with_offset = DM4DataSet(
+    ds_no_offset = lt_ctx.load('dm', filename)
+    ds_with_offset = SingleDMDataSet(
         path=filename,
         sync_offset=sync_offset,
     )
