@@ -354,14 +354,26 @@ class DM4DataSet(DataSet):
             return tileshape
         sig_shape = self.shape.sig.to_tuple()
         depth, sig_tile = tileshape[0], tileshape[1:]
-        if sig_tile == sig_shape:
+        if sig_tile == sig_shape and depth == 1:
             # whole frames, nothing to do
             return tileshape
-        sig_stub = sig_shape[1:]
-        # try to pick a dimension which gives tiles of similar
-        # bytesize to that proposed by the Negotiator
-        final_dim = max(1, prod(sig_tile) // prod(sig_stub))
-        return (depth,) + (final_dim,) + sig_stub
+        # Find a tileshape with the same number of total
+        # elements as the proposed tileshape and in a
+        # C-contig form. If the input tileshape is already C
+        # ravellable then this will be a no-op. Written to
+        # allow injecting a different depth value while keeping
+        # the same overall tile size.
+        tilesize_px = prod(tileshape)
+        # max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
+        # depth = min(max_depth, depth)
+        sig_px = max(1, tilesize_px // depth)
+        # we constrain to sig_dims == 2 for DM files
+        _, cols = sig_shape
+        if sig_px < cols:
+            out_tileshape = (depth, 1, sig_px)
+        else:
+            out_tileshape = (depth, max(sig_px // cols, 1), cols)
+        return out_tileshape
 
     def need_decode(
         self,
@@ -470,6 +482,28 @@ class RawPartitionFortran(BasePartition):
             return
         corrections.apply(data, tile_slice)
 
+    @classmethod
+    def validate_tiling_scheme(cls, tiling_scheme: 'TilingScheme'):
+        slices = tiling_scheme.slices_array
+        shape = tiling_scheme.dataset_shape
+        # Group of full columns
+        contig_full = (slices[:, 1, :-1] == shape.sig[:-1]).all()
+        # Part of a single column, only
+        contig_part = (slices[:, 1, 1:] == 1).all()
+        if not (contig_full or contig_part):
+            raise DataSetException('slices not split in a ravel-able way')
+
 
 class DM4PartitionFortran(RawPartitionFortran):
     sig_order = 'C'
+
+    @classmethod
+    def validate_tiling_scheme(cls, tiling_scheme: 'TilingScheme'):
+        slices = tiling_scheme.slices_array
+        shape = tiling_scheme.dataset_shape
+        # Group of full rows
+        contig_full = (slices[:, 1, 1:] == shape.sig[1:]).all()
+        # Part of a single row, only
+        contig_part = (slices[:, 1, :-1] == 1).all()
+        if not (contig_full or contig_part):
+            raise DataSetException('slices not split in a ravel-able way')

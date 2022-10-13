@@ -5,10 +5,11 @@ import numpy as np
 import pytest
 
 from libertem.common.shape import Shape
+from libertem.io.dataset.base.exceptions import DataSetException
 from libertem.io.dataset.base.tiling_scheme import TilingScheme
 from libertem.udf.base import UDF
 from libertem.udf.sumsigudf import SumSigUDF
-from libertem.io.dataset.dm4 import DM4DataSet
+from libertem.io.dataset.dm4 import DM4DataSet, DM4PartitionFortran
 
 from utils import ValidationUDF, _mk_random, dataset_correction_verification
 
@@ -372,3 +373,19 @@ def test_negative_sync_offset(monkeypatch, dm4_mockfile, lt_ctx, request):
     result_with_offset = result_with_offset['intensity'].raw_data[abs(sync_offset):]
 
     assert np.allclose(result, result_with_offset)
+
+
+@pytest.mark.parametrize(
+    "shape, tileshape, raises",
+    [
+        (Shape((8, 30, 50), 2), Shape((3, 4, 15), 2), DataSetException),
+        (Shape((8, 4, 30, 50), 3), Shape((3, 1, 50, 50), 3), None),
+    ],
+)
+def test_validate_tiling_scheme(shape, tileshape, raises):
+    scheme = TilingScheme.make_for_shape(tileshape, shape)
+    if raises is not None:
+        with pytest.raises(raises):
+            DM4PartitionFortran.validate_tiling_scheme(scheme)
+    else:
+        DM4PartitionFortran.validate_tiling_scheme(scheme)

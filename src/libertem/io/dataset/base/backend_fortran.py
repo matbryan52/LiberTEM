@@ -9,7 +9,6 @@ import numpy as np
 from math import ceil, floor
 
 from libertem.common.math import prod
-from .exceptions import DataSetException
 
 if typing.TYPE_CHECKING:
     from libertem.common.shape import Shape
@@ -42,7 +41,7 @@ class FortranReader:
                  shape: 'Shape',
                  dtype: np.dtype,
                  tiling_scheme: 'TilingScheme',
-                 sig_order='F',
+                 sig_order: Literal['F', 'C'] = 'F',
                  file_header: int = 0):
         self._path = path
         self._dtype = dtype
@@ -52,7 +51,9 @@ class FortranReader:
         self._sig_order = sig_order
         self._tiling_scheme = tiling_scheme
 
-        self.verify_tiling(tiling_scheme, shape, sig_order)
+        if sig_order not in ('F', 'C'):
+            raise ValueError('Unrecognized sig_order')
+
         chunks, chunk_scheme_indices = self.choose_chunks(tiling_scheme,
                                                           shape,
                                                           dtype)
@@ -65,24 +66,6 @@ class FortranReader:
 
         # (index of chunk currently mapped, None | np.memmap)
         self._memmap = (-1, None)
-
-    @staticmethod
-    def verify_tiling(tiling_scheme: 'TilingScheme', shape: 'Shape', sig_order: Literal['F', 'C']):
-        slices = tiling_scheme.slices_array
-        # sig slices are flattened according to sig_order
-        # if a sig slice does not span all dimensions except
-        # the first/last (for C-/F-) then the slices can't be ravelled
-        if sig_order == 'C':
-            if not (slices[:, 1, 1:] == shape.sig[1:]).all():
-                raise DataSetException('slices not split in first dim only')
-        elif sig_order == 'F':
-            if not (slices[:, 1, :-1] == shape.sig[:-1]).all():
-                raise DataSetException('slices not split in last dim only')
-        else:
-            raise ValueError(f'sig_order {sig_order} not recognized')
-        # should also encourage that (nav_size * itemsize * shape.sig[1:]) < cls.MAX_MEMMAP_SIZE
-        # else we will have tiles spanning multiple chunks with read overhead
-        # favour small tiles to get optimal behaviour
 
     @classmethod
     def choose_chunks(cls, tiling_scheme: 'TilingScheme', shape: 'Shape', dtype: 'DTypeLike'):
