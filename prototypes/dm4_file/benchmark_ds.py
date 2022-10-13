@@ -77,7 +77,7 @@ class RawDM4Like(RawFileDataSet):
             if sig_pix < cols:
                 shape = (depth, 1, sig_pix)
             else:
-                shape = (depth, max(rows // sig_pix, 1), cols)
+                shape = (depth, max(sig_pix // rows, 1), cols)
             return shape
 
     def need_decode(self, *args, **kwargs):
