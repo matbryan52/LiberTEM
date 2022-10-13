@@ -271,7 +271,9 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
 
     out_dir = pathlib.Path(__file__).parent / 'results'
     out_dir.mkdir(exist_ok=True)
-    with (out_dir / f'{datetime.datetime.now().isoformat(sep="_", timespec="seconds")}.json').open('w') as fp:
+    thetime = datetime.datetime.now().isoformat(sep="_", timespec="seconds")
+    int_speed = int(trace['results']['stats']['speed_mbs'])
+    with (out_dir / f'{thetime}_{ds_size_mb}mb_{int_speed}mbps.json').open('w') as fp:
         json.dump(trace, fp, indent=2)
 
     return trace
