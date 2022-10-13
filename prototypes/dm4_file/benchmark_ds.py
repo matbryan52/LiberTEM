@@ -31,12 +31,13 @@ class SumFrameUDF(UDF):
 
 
 class RawDM4Like(RawFileDataSet):
-    def __init__(self, *args, num_part=None, tileshape=None, max_io=1, **kwargs):
+    def __init__(self, *args, num_part=None, tileshape=None, max_io=1, part_size=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._array_c_ordered = False
         self._num_part = num_part
         self._tileshape = tileshape
         self._max_io = max_io
+        self._part_size = part_size
 
     def get_partitions(self):
         return DM4DataSet.get_partitions(self)
@@ -90,6 +91,9 @@ class RawDM4Like(RawFileDataSet):
     def get_num_partitions(self) -> int:
         if self._num_part is not None:
             return self._num_part
+        elif self._part_size is not None:
+            ds_size_bytes = self.shape.size * np.dtype(self.meta.raw_dtype).itemsize
+            return max(1, ds_size_bytes // (self._part_size * 2**20))
         else:
             return super().get_num_partitions()
 
@@ -162,6 +166,8 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
               default=False, is_flag=True)              
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
+@click.option('--part_size_mb',
+              default=None, type=int)
 @click.option('--max_io', help='max_io_size mb',
               default=1, type=int)
 @click.option('--combine', default=None, type=int)
@@ -169,7 +175,7 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
 @click.option('--buffer', default=None, type=int)
 @click.option('--tileshape', default=None, type=str)
 def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
-         combine, memmap, buffer, tileshape, max_io, roi, frame):
+         combine, memmap, buffer, tileshape, max_io, roi, frame, part_size_mb):
 
     trace = {'inputs': {}, 'run': {}, 'results': {}}
     trace['inputs']['ds_size_mb'] = ds_size_mb
@@ -184,6 +190,7 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
     trace['inputs']['max_io'] = max_io
     trace['inputs']['roi'] = roi
     trace['inputs']['frame'] = frame
+    trace['inputs']['part_size_mb'] = part_size_mb
 
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
@@ -219,7 +226,7 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
         with adapt_params(FortranReader, mods):
             ds = RawDM4Like(path=path, nav_shape=nav_shape, sig_shape=sig_shape,
                             dtype=dtype, num_part=num_part, tileshape=tileshape,
-                            max_io=max_io)
+                            max_io=max_io, part_size=part_size_mb)
             ds.initialize(ctx.executor)
             udf = udf_class()
 
