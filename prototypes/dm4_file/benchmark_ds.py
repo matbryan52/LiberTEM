@@ -155,6 +155,9 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
 @click.option('--roi',
               help="use roi",
               default=False, is_flag=True)
+@click.option('--frame',
+              help="use frame processing",
+              default=False, is_flag=True)              
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
 @click.option('--max_io', help='max_io_size mb',
@@ -164,11 +167,14 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
 @click.option('--buffer', default=None, type=int)
 @click.option('--tileshape', default=None, type=str)
 def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
-         combine, memmap, buffer, tileshape, max_io, roi):
+         combine, memmap, buffer, tileshape, max_io, roi, frame):
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
     corrections = None
-    udf_class = SumSigUDF
+    if frame:
+        udf_class = SumFrameUDF
+    else:
+        udf_class = SumSigUDF
 
     mods = {
         'MAX_MEMMAP_SIZE': memmap,
