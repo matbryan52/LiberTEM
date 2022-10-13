@@ -152,6 +152,9 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
 @click.option('--warm',
               help="warm cache",
               default=False, is_flag=True)
+@click.option('--roi',
+              help="use roi",
+              default=False, is_flag=True)
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
 @click.option('--max_io', help='max_io_size mb',
@@ -161,10 +164,9 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
 @click.option('--buffer', default=None, type=int)
 @click.option('--tileshape', default=None, type=str)
 def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
-         combine, memmap, buffer, tileshape, max_io):
+         combine, memmap, buffer, tileshape, max_io, roi):
     ctx = lt.Context.make_with('inline')
     dtype = np.float32
-    roi = None
     corrections = None
     udf_class = SumSigUDF
 
@@ -184,6 +186,11 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
     print('Creating data...', end='', flush=True)
     tstart = time.perf_counter()
 
+    if roi:
+        roi_a = np.random.choice([True, False], size=nav_shape)
+    else:
+        roi_a = None
+
     with get_data(nav_shape, sig_shape, dtype) as path:
         print(f'Done ({true_size_mb / (time.perf_counter() - tstart):.1f} MB/s)')
         with adapt_params(FortranReader, mods):
@@ -193,11 +200,11 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
             ds.initialize(ctx.executor)
             udf = udf_class()
 
-            tasks, params = UDFRunner([udf])._prepare_run_for_dataset(ds, ctx.executor, roi, corrections, None, False)
+            tasks, params = UDFRunner([udf])._prepare_run_for_dataset(ds, ctx.executor, roi_a, corrections, None, False)
             print(f'Num partitions {len(tasks)}, {udf.__class__.__name__}, {ctx.executor.__class__.__name__}')
             print(f'{params.tiling_scheme}, {params.tiling_scheme.intent}')
             # Warmup .pyc / numba etc
-            res = ctx.run_udf(dataset=ds, udf=udf, roi=roi, corrections=corrections)
+            res = ctx.run_udf(dataset=ds, udf=udf, roi=roi_a, corrections=corrections)
 
             runs = []
             for _ in tqdm.trange(repeats):
@@ -206,7 +213,7 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
                 else:
                     warmup_cache([str(path)])
                 tstart = time.perf_counter()
-                res = ctx.run_udf(dataset=ds, udf=udf, roi=roi, corrections=corrections)
+                res = ctx.run_udf(dataset=ds, udf=udf, roi=roi_a, corrections=corrections)
                 runs.append(time.perf_counter() - tstart)
 
             assert res['intensity'].data[0, 0] == 0
