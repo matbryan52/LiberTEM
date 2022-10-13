@@ -8,13 +8,11 @@ import numpy as np
 
 from libertem.common.math import prod
 from libertem.common import Shape, Slice
-from libertem.common.messageconverter import MessageConverter
 from libertem.io.dataset.base.tiling import DataTile
 from .base import (
-    FileSet, BasePartition, DataSetException, DataSetMeta,
-    File, IOBackend,
+    FileSet, BasePartition, DataSetException, DataSetMeta, File,
 )
-from .dm import DMDataSet
+from .dm import DMDataSet, SingleDMDatasetParams
 from libertem.io.dataset.base.backend_fortran import FortranReader
 
 log = logging.getLogger(__name__)
@@ -24,46 +22,6 @@ if typing.TYPE_CHECKING:
     from libertem.io.dataset.base.tiling_scheme import TilingScheme
     from libertem.executor.base import JobExecutor
     from libertem.io.corrections.corrset import CorrectionSet
-
-
-class DM4DatasetParams(MessageConverter):
-    SCHEMA = {
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "$id": "http://libertem.org/DM4DatasetParams.schema.json",
-        "title": "DM4DatasetParams",
-        "type": "object",
-        "properties": {
-            "type": {"const": "DM4"},
-            "path": {"type": "string"},
-            "nav_shape": {
-                "type": "array",
-                "items": {"type": "number", "minimum": 1},
-                "minItems": 2,
-                "maxItems": 2
-            },
-            "sig_shape": {
-                "type": "array",
-                "items": {"type": "number", "minimum": 1},
-                "minItems": 2,
-                "maxItems": 2
-            },
-            "sync_offset": {"type": "number"},
-            "io_backend": {
-                "enum": IOBackend.get_supported(),
-            },
-        },
-        "required": ["type", "path"]
-    }
-
-    def convert_to_python(self, raw_data):
-        data = {
-            k: raw_data[k]
-            for k in ["path"]
-        }
-        for k in ["nav_shape", "sig_shape", "sync_offset"]:
-            if k in raw_data:
-                data[k] = raw_data[k]
-        return data
 
 
 class SingleDMDataSet(DMDataSet):
@@ -152,7 +110,7 @@ class SingleDMDataSet(DMDataSet):
 
     @classmethod
     def get_msg_converter(cls):
-        return DM4DatasetParams
+        return SingleDMDatasetParams
 
     @classmethod
     def detect_params(cls, path, executor):

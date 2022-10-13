@@ -12,6 +12,7 @@ from libertem.io.dataset.base.file import OffsetsSizes
 from libertem.common.messageconverter import MessageConverter
 from .base import (
     DataSet, FileSet, BasePartition, DataSetException, DataSetMeta, File,
+    IOBackend,
 )
 
 log = logging.getLogger(__name__)
@@ -20,7 +21,47 @@ if typing.TYPE_CHECKING:
     from numpy import typing as nt
 
 
-class DMDatasetParams(MessageConverter):
+class SingleDMDatasetParams(MessageConverter):
+    SCHEMA = {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "$id": "http://libertem.org/DMDatasetParams.schema.json",
+        "title": "DMDatasetParams",
+        "type": "object",
+        "properties": {
+            "type": {"const": "DM"},
+            "path": {"type": "string"},
+            "nav_shape": {
+                "type": "array",
+                "items": {"type": "number", "minimum": 1},
+                "minItems": 2,
+                "maxItems": 2
+            },
+            "sig_shape": {
+                "type": "array",
+                "items": {"type": "number", "minimum": 1},
+                "minItems": 2,
+                "maxItems": 2
+            },
+            "sync_offset": {"type": "number"},
+            "io_backend": {
+                "enum": IOBackend.get_supported(),
+            },
+        },
+        "required": ["type", "path"]
+    }
+
+    def convert_to_python(self, raw_data):
+        data = {
+            k: raw_data[k]
+            for k in ["path"]
+        }
+        for k in ["nav_shape", "sig_shape", "sync_offset"]:
+            if k in raw_data:
+                data[k] = raw_data[k]
+        return data
+
+
+class StackedDMDatasetParams(MessageConverter):
     SCHEMA: typing.Dict = {}
 
     def convert_from_python(self, raw_data):
@@ -75,6 +116,20 @@ class DMDataSet(DataSet):
         else:
             subclass = SingleDMDataSet
         return super().__new__(subclass)
+
+    @classmethod
+    def get_supported_extensions(cls):
+        return {"dm3", "dm4"}
+
+    @classmethod
+    def get_msg_converter(cls):
+        return SingleDMDatasetParams
+
+    @classmethod
+    def detect_params(cls, path, executor):
+        # delayed here to avoid circular reference
+        from .dm_single import SingleDMDataSet
+        return SingleDMDataSet.detect_params(path, executor)
 
 
 class StackedDMDataSet(DMDataSet):
@@ -261,7 +316,7 @@ class StackedDMDataSet(DMDataSet):
 
     @classmethod
     def get_msg_converter(cls) -> typing.Type[MessageConverter]:
-        return DMDatasetParams
+        return StackedDMDatasetParams
 
     @classmethod
     def detect_params(cls, path, executor):
