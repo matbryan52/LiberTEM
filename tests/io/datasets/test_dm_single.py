@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from libertem.common.shape import Shape
+from libertem.common.math import prod
 from libertem.io.dataset.base.exceptions import DataSetException
 from libertem.io.dataset.base.tiling_scheme import TilingScheme
 from libertem.udf.base import UDF
@@ -49,9 +50,9 @@ class MockFileDM:
                 self.allTags[key] = 1
                 shape_unpack = zip(shape, c_shape_order)
             else:
-                key = f'ImageList.{ds_idx}.Null'
-                self.allTags[key] = 0
                 shape_unpack = zip(shape, f_shape_order)
+            key = f'ImageList.{ds_idx}.ImageTags.Meta Data.Format'
+            self.allTags[key] = 'Diffraction image'
             for s, dim in shape_unpack:
                 dim.append(s)
 
@@ -391,3 +392,71 @@ def test_validate_tiling_scheme(shape, tileshape, raises):
             DM4PartitionFortran.validate_tiling_scheme(scheme)
     else:
         DM4PartitionFortran.validate_tiling_scheme(scheme)
+
+
+def test_nav_reshaping_f_error(monkeypatch, dm4_mockfile_f, lt_ctx_fast):
+    (_, filename), mock_fileDM = dm4_mockfile_f
+    _patch_filedm(monkeypatch, mock_fileDM)
+
+    with pytest.raises(DataSetException):
+        lt_ctx_fast.load('dm', filename, nav_shape=(10, 10))
+
+
+def test_nav_reshaping_c_error(monkeypatch, dm4_mockfile_c, lt_ctx_fast):
+    (array, filename), mock_fileDM = dm4_mockfile_c
+    _patch_filedm(monkeypatch, mock_fileDM)
+
+    nav_shape = tuple(d + 1 for d in array.shape[:2])
+    with pytest.raises(DataSetException):
+        lt_ctx_fast.load('dm', filename, nav_shape=nav_shape)
+
+
+def test_nav_reshaping_c(monkeypatch, dm4_mockfile_c, lt_ctx_fast):
+    (array, filename), mock_fileDM = dm4_mockfile_c
+    _patch_filedm(monkeypatch, mock_fileDM)
+
+    # read only part of the nav space
+    manual_nav_shape = tuple(d - 1 for d in array.shape[:2])
+    ds = lt_ctx_fast.load('dm', filename, nav_shape=manual_nav_shape)
+    res = lt_ctx_fast.run_udf(dataset=ds, udf=SumSigUDF())
+    result_array = res['intensity'].data
+
+    _, _, sy, sx = array.shape
+    nframes = prod(manual_nav_shape)
+    partial_sum = array.reshape(-1, sy, sx).sum(axis=(1, 2))[:nframes]
+    assert np.allclose(result_array, partial_sum.reshape(manual_nav_shape))
+
+
+def test_sig_reshaping_f_error(monkeypatch, dm4_mockfile_f, lt_ctx_fast):
+    (_, filename), mock_fileDM = dm4_mockfile_f
+    _patch_filedm(monkeypatch, mock_fileDM)
+
+    with pytest.raises(DataSetException):
+        lt_ctx_fast.load('dm', filename, sig_shape=(10, 10))
+
+
+def test_sig_reshaping_c_error(monkeypatch, dm4_mockfile_c, lt_ctx_fast):
+    (array, filename), mock_fileDM = dm4_mockfile_c
+    _patch_filedm(monkeypatch, mock_fileDM)
+
+    sig_shape = tuple(d + 1 for d in array.shape[2:])
+    with pytest.raises(DataSetException):
+        lt_ctx_fast.load('dm', filename, sig_shape=sig_shape)
+
+
+def test_sig_reshaping_c(monkeypatch, dm4_mockfile_c, lt_ctx_fast):
+    (array, filename), mock_fileDM = dm4_mockfile_c
+    _patch_filedm(monkeypatch, mock_fileDM)
+
+    # read only part of each sig space
+    manual_sig_shape = tuple(d - 1 for d in array.shape[:2])
+    ds = lt_ctx_fast.load('dm', filename, sig_shape=manual_sig_shape)
+    res = lt_ctx_fast.run_udf(dataset=ds, udf=SumSigUDF())
+    result_array = res['intensity'].data
+
+    ny, nx = array.shape[:2]
+    flat_array = array.ravel()
+    nel = ny * nx * prod(manual_sig_shape)
+    partial_array = flat_array[:nel].reshape(array.shape[:2] + manual_sig_shape)
+    partial_sum = partial_array.sum(axis=(2, 3))
+    assert np.allclose(result_array, partial_sum)
