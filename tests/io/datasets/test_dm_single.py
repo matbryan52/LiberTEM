@@ -24,6 +24,8 @@ class MockFileDM:
         self.dataOffset = []
         self.dataType = []
         self.allTags = {}
+        self.thumbnail = False
+        self.numObjects = len(shapes)
 
         c_shape_order = (self.zSize2,
                          self.zSize,
