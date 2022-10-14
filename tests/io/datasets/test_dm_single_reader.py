@@ -320,8 +320,12 @@ def test_read_contig(raw_data_8x8x8x8_path, tileshape):
                            tiling_scheme,
                            sig_order='C')
 
+    # Must fake the transposed data as we are treating the
+    # data on-disk as F/C-ordered even though it is not!
     array = np.transpose(array, (2, 3, 0, 1))
-    array = array.reshape(-1, *array.shape[-2:])
+    # array reshaped is how the data on disk should be read
+    # if it truly was F/C-ordered (flatnav, sigy, sigx)
+    array = array.reshape(-1, 8, 8)
     # Skip first and last frame
     get_slice = slice(1, 8 * 8 - 1)
     for idcs_in_flat_nav, scheme_index, tile in reader.generate_tiles(get_slice):
