@@ -325,6 +325,21 @@ class SingleDMDataSet(DMDataSet):
         else:
             self._sig_shape = sig_shape
 
+        if not self._array_c_ordered and self._filesize > 2**31:  # warn above 2 GB file
+            warnings.warn(
+                "This DM dataset is laid out on disk in a way that is inefficient "
+                "for LiberTEM to process. Performance may be severely impacted. "
+                "To avoid this use a recent version of GMS to acquire data.",
+                RuntimeWarning
+            )
+            if self._io_backend is not None:
+                warnings.warn(
+                    "An I/O backend was specified which cannot read this "
+                    "DM file due to its layout. Using the dataset-specific file "
+                    "reader instead.",
+                    RuntimeWarning
+                )
+
         # regardless of file order the Dataset shape property is 'standard'
         shape = Shape(self._nav_shape + self._sig_shape, sig_dims=sig_dims)
         self._sync_offset_info = self.get_sync_offset_info()
