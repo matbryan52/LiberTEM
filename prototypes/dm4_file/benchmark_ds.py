@@ -15,8 +15,8 @@ import socket
 import libertem.api as lt
 from libertem.common.math import prod
 from libertem.io.dataset.raw import RawFileDataSet
-from libertem.io.dataset.dm4 import DM4DataSet
-from libertem.io.dataset.base.backend_fortran import FortranReader
+from libertem.io.dataset.dm_single import SingleDMDataSet
+from libertem.io.dataset.dm_single_reader import FortranReader
 from libertem.udf.sumsigudf import SumSigUDF
 from libertem.udf.base import UDF, UDFRunner
 
@@ -41,11 +41,11 @@ class RawDM4Like(RawFileDataSet):
         self._part_size = part_size
 
     def get_partitions(self):
-        return DM4DataSet.get_partitions(self)
+        return SingleDMDataSet.get_partitions(self)
 
     def adjust_tileshape(self, *args, **kwargs):
         if self._tileshape is None:
-            return DM4DataSet.adjust_tileshape(self, *args, **kwargs)
+            return SingleDMDataSet.adjust_tileshape(self, *args, **kwargs)
         if isinstance(self._tileshape, str):
             tileshape = eval(self._tileshape)
         else:
@@ -54,7 +54,8 @@ class RawDM4Like(RawFileDataSet):
         max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
         if isinstance(tileshape, tuple):
             assert len(tileshape) == 3
-            for dim_idx, (tile_dim, shape_dim) in enumerate(zip(tileshape, self.shape.flatten_nav())):
+            for dim_idx, (tile_dim, shape_dim) in enumerate(zip(tileshape,
+                                                                self.shape.flatten_nav())):
                 if tile_dim is None:
                     if dim_idx == 0:
                         shape.append(max_depth)
@@ -87,7 +88,7 @@ class RawDM4Like(RawFileDataSet):
             return shape
 
     def need_decode(self, *args, **kwargs):
-        return DM4DataSet.need_decode(self, *args, **kwargs)
+        return SingleDMDataSet.need_decode(self, *args, **kwargs)
 
     def get_num_partitions(self) -> int:
         if self._num_part is not None:
@@ -165,7 +166,7 @@ def get_ds_shape(ds_size_mb, sig_size_mb, dtype):
               default=False, is_flag=True)
 @click.option('--frame',
               help="use frame processing",
-              default=False, is_flag=True)              
+              default=False, is_flag=True)
 @click.option('-n', '--num_part', help='number of partitions',
               default=None, type=int)
 @click.option('--part_size_mb',
@@ -214,7 +215,8 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
     drop_caches = not warm
 
     nav_shape, sig_shape, true_size_mb = get_ds_shape(ds_size_mb, sig_size_mb, dtype)
-    print(f'{nav_shape}, {sig_shape}, {str(np.dtype(np.float32))}, {true_size_mb:.1f} MB), warm caches: {warm}')
+    print(f'{nav_shape}, {sig_shape}, {str(np.dtype(np.float32))}, '
+          f'{true_size_mb:.1f} MB), warm caches: {warm}')
     print('Creating data...', end='', flush=True)
     tstart = time.perf_counter()
 
@@ -232,8 +234,10 @@ def main(ds_size_mb, sig_size_mb, repeats, warm, num_part,
             ds.initialize(ctx.executor)
             udf = udf_class()
 
-            tasks, params = UDFRunner([udf])._prepare_run_for_dataset(ds, ctx.executor, roi_a, corrections, None, False)
-            print(f'Num partitions {len(tasks)}, {udf.__class__.__name__}, {ctx.executor.__class__.__name__}')
+            tasks, params = UDFRunner([udf])._prepare_run_for_dataset(ds, ctx.executor, roi_a,
+                                                                      corrections, None, False)
+            print(f'Num partitions {len(tasks)}, {udf.__class__.__name__}, '
+                  f'{ctx.executor.__class__.__name__}')
             print(f'{params.tiling_scheme}, {params.tiling_scheme.intent}')
             # Warmup .pyc / numba etc
             res = ctx.run_udf(dataset=ds, udf=udf, roi=roi_a, corrections=corrections)
