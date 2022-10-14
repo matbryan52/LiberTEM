@@ -306,7 +306,7 @@ class SingleDMDataSet(DMDataSet):
             manual_nav_shape_product = prod(self._nav_shape)
             if manual_nav_shape_product > self._image_count:
                 raise DataSetException('Specified nav_shape greater than file nav size')
-            elif self._array_c_ordered and (manual_nav_shape_product != self._image_count):
+            elif not self._array_c_ordered and (manual_nav_shape_product != self._image_count):
                 raise DataSetException('Manual nav shape with different size '
                                        'not supported for F-ordered DM4')
         else:
@@ -316,7 +316,7 @@ class SingleDMDataSet(DMDataSet):
         sig_size = int(prod(sig_shape))
         if self._sig_shape is not None:
             manual_sig_size = int(prod(self._sig_shape))
-            if self._array_c_ordered and (sig_size != manual_sig_size):
+            if not self._array_c_ordered and (sig_size != manual_sig_size):
                 raise DataSetException('Manual sig shape with different size '
                                        'not supported for F-ordered DM4')
             elif (manual_sig_size * self._nav_shape_product) > (self._image_count * sig_size):
