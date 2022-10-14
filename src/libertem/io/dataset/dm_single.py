@@ -1,4 +1,5 @@
 import os
+import warnings
 import typing
 from typing import Dict, Any, Tuple, Optional
 import logging
@@ -26,11 +27,15 @@ class SingleDMDataSet(DMDataSet):
     """
     Reader for a single DM3/DM4 file
 
-    Where possible the navigation structure: 4D-scan or 3D-stack,
-    will be inferred from the file metadata. In the GUI a 3D-stack
-    will have an extra singleton navigation dimension prepended
-    to allow it to display. DM files containing only a single data array
-    are supported (multi-array files will raise an error).
+    Where possible the structure will be inferred from the file metadata.
+    In the GUI a 2D-image or 3D-stack/spectrum image will have extra
+    singleton navigation dimensions prepended to allow them to display.
+    DM files containing multiple datasets are supported via the
+    `dataset_index` argument.
+
+    While capable of reading 2D/3D files, LiberTEM is not particularly
+    well-adapted to processing these data and the user should consider
+    other tools. Individual spectra or vectors (1D data) are not supported.
 
     Note
     ----
@@ -38,14 +43,14 @@ class SingleDMDataSet(DMDataSet):
     which is an option in recent versions of GMS. In this case the dataset
     will try to infer this and use normal LiberTEM I/O for reading the file.
     If the file uses the older hybrid C/F-ordering (flat_sig, flat_nav)
-    then a dedicated I/O backend will be used instead, though performance
+    then a dedicated I/O backend will be used instead, and performance
     will be severely limited in this mode.
 
     The format is normally stored in the DM tags, but depending on the tag
-    integrity it might not be possible to infer it. The DM-default is hybrid
-    C/F-ordering, therefore the lower-performance specialised I/O is
-    used by default. A C-ordered format interpretation can be forced
-    using the dataset parameters.
+    integrity it might not be possible to infer it. The default is hybrid
+    C/F-ordering for STEM data, therefore the lower-performance specialised
+    I/O is used by default. A C-ordered format interpretation can be forced
+    using the `force_c_order` argument.
 
     Parameters
     ----------
@@ -68,10 +73,17 @@ class SingleDMDataSet(DMDataSet):
         Force the data to be interpreted as a C-ordered
         array regardless of the tag information. This will lead
         to incorrect results on an hybrid C/F-ordered file
+
+    dataset_index: int, optional
+        In the case of a multi-dataset DM file this can
+        be used to open a specific dataset index. Note that
+        the datasets in a DM-file often begin with a thumbnail
+        which occupies the 0 dataset index. If not provided the
+        first compatible dataset found in the file is used.
     """
     def __init__(self, path, nav_shape=None, sig_shape=None,
-                 sync_offset=0, io_backend=None, sig_dims=2,
-                 force_c_order=False):
+                 sync_offset=0, io_backend=None,
+                 force_c_order=False, dataset_index=None):
         super().__init__(io_backend=io_backend)
         self._filesize = None
 
@@ -79,10 +91,8 @@ class SingleDMDataSet(DMDataSet):
         self._nav_shape = tuple(nav_shape) if nav_shape else None
         self._sig_shape = tuple(sig_shape) if sig_shape else None
         self._sync_offset = sync_offset
-        self._sig_dims = sig_dims
         self._force_c_order = force_c_order
-        if self._sig_dims != 2:
-            raise DataSetException('Non-2D signals not yet supported in DM4DataSet')
+        self._dm_ds_index = dataset_index
 
     def __repr__(self):
         try:
@@ -111,17 +121,23 @@ class SingleDMDataSet(DMDataSet):
         return SingleDMDatasetParams
 
     @classmethod
-    def detect_params(cls, path, executor):
+    def detect_params(cls, path: str, executor):
         pathlow = path.lower()
         if pathlow.endswith(".dm3") or pathlow.endswith(".dm4"):
             array_meta = executor.run_function(cls._read_metadata, path)
+            sig_dims = array_meta['sig_dims']
+            if sig_dims == 1:
+                # raise ValueError('Unable to display 1D spectra as signals in the GUI')
+                return False
             sync_offset = 0
             nav_shape, sig_shape = cls._modify_shape(array_meta['shape'],
-                                                     array_meta['c_order'])
+                                                    array_meta['c_order'],
+                                                    sig_dims=sig_dims)
             if len(nav_shape) == 1:
                 nav_shape = (1,) + nav_shape
             image_count = prod(nav_shape)
         else:
+            # raise ValueError(f'Unecognized extension {os.path.splitext(pathlow)[1]}')
             return False
         return {
             "parameters": {
@@ -145,48 +161,92 @@ class SingleDMDataSet(DMDataSet):
             raise DataSetException("invalid dataset: %s" % e)
 
     @classmethod
-    def _read_metadata(cls, path):
+    def _read_metadata(cls, path, use_ds=None):
         with ncempy.io.dm.fileDM(path, on_memory=True) as fp:
+            tags = fp.allTags
             array_map = {}
-            ndims = fp.dataShape
-            for ds_idx, dims in enumerate(ndims):
-                if dims < 3:
-                    # Single-image DM3/4 files not supported
+            start_from = 1 if fp.thumbnail else 0
+            for ds_idx in range(start_from, fp.numObjects):
+                dims = fp.dataShape[ds_idx]
+                if dims < 2:
+                    # Spectrum-only ?
                     continue
-                shape = (fp.xSize[ds_idx], fp.ySize[ds_idx], fp.zSize[ds_idx])
-                if dims == 4:
+                shape = (fp.xSize[ds_idx], fp.ySize[ds_idx])
+                if dims > 2:
+                    shape = shape + (fp.zSize[ds_idx],)
+                if dims > 3:
                     shape = shape + (fp.zSize2[ds_idx],)
                 array_map[ds_idx] = {'shape': shape, 'ds_idx': ds_idx}
-            if not array_map:
-                raise DataSetException('Unable to find any 3/4D datasets in DM file')
-            elif len(array_map) > 1:
-                raise DataSetException('No support for multiple datasets in same file')
-
-            array_offsets = fp.dataOffset
-            array_types = fp.dataType
-            for ds_idx in array_map.keys():
-                array_map[ds_idx]['offset'] = array_offsets[ds_idx]
+                array_map[ds_idx]['offset'] = fp.dataOffset[ds_idx]
                 try:
-                    array_map[ds_idx]['dtype'] = fp._DM2NPDataType(array_types[ds_idx])
+                    array_map[ds_idx]['dtype'] = fp._DM2NPDataType(fp.dataType[ds_idx])
                 except OSError:
                     # unconvertible DM data type
-                    array_map[ds_idx]['dtype'] = array_types[ds_idx]
+                    array_map[ds_idx]['dtype'] = fp.dataType[ds_idx]
 
-            tags = fp.allTags
-        assert len(array_map) == 1
+        if not array_map:
+            raise DataSetException('Unable to find any 2/3/4D datasets in DM file')
+
+        if use_ds is not None:
+            if use_ds in array_map.keys():
+                ds_idx = use_ds
+            else:
+                raise DataSetException(f'Specified dataset idx {use_ds} not found in file')
+        else:
+            # Use first dataset index we loaded
+            ds_idx = [*array_map.keys()][0]
+            if len(array_map) > 1:
+                warnings.warn(
+                    "Found multiple datasets in DM file, using first dataset",
+                    RuntimeWarning
+                )
+
         array_meta = array_map[ds_idx]
+        ndims = len(array_meta['shape'])
+        # Set default metadata in case tags are incomplete
+        array_meta['format'] = 'Unknown'
+        array_meta['sig_dims'] = 2
+        # Assume C-ordering for 2D images and 3D image stacks
+        # Assume F-ordering for STEM data unless tagged otherwise
+        # Spectrum images are also F-ordered but these data must
+        # be recognized from the tags (they can be 2- or 3-D)
+        array_meta['c_order'] = True if ndims in (2, 3) else False
 
         # Infer array ordering
         nest = cls._tags_to_nest(tags)
+        # Must + 1 because DM uses 1-based-indexing in its tags
         dm_data_key = str(array_meta['ds_idx'] + 1)
-        data_tags = nest['ImageList'][dm_data_key]
         try:
-            # Must bool(int(val)) just in case the flag is string '0'
-            is_c_ordered = bool(int(data_tags['ImageTags']['Meta Data']['Data Order Swapped']))
-        except (KeyError, ValueError):
-            # Defer to tag, otherwise assume F-order unless 3D dataset which seems to be C-ordered
-            is_c_ordered = False or (len(array_meta['shape']) == 3)
-        array_meta['c_order'] = is_c_ordered
+            data_tags = nest['ImageList'][dm_data_key]['ImageTags']
+        except KeyError:
+            # unrecognized / invalid tag structure, return defaults
+            return array_meta
+
+        if 'Meta Data' in data_tags:
+            meta_data = data_tags['Meta Data']
+            array_meta['format'] = meta_data.get('Format', 'Unknown')
+            if str(array_meta['format']).strip().lower() == 'spectrum image':
+                assert ndims in (2, 3)
+                array_meta['sig_dims'] = 1
+                if ndims == 3:
+                    # 3-D spectrum images seem to be F-ordered
+                    # 2-D SI are seemingly C-ordered (value set above)
+                    array_meta['c_order'] = False
+            if 'Data Order Swapped' in meta_data:
+                # Always defer to tag for ordering if available
+                # This line handes the new-style STEM datasets
+                # The bool(int()) is just-in-case for string tags
+                array_meta['c_order'] = bool(int(meta_data['Data Order Swapped']))
+
+        # Need to find a 3D image stack with the 'Meta Data' + 'Format' tags
+        if array_meta['format'] not in ('Spectrum image',
+                                        'Image',
+                                        'Diffraction image'):
+            warnings.warn(
+                f"Unrecognized image format {array_meta['format']}, "
+                "DM tags may be parsed incorrectly",
+                RuntimeWarning
+            )
         return array_meta
 
     @staticmethod
@@ -221,18 +281,24 @@ class SingleDMDataSet(DMDataSet):
         shape = tuple(map(int, shape))
         nav_shape = shape[:-sig_dims]
         sig_shape = shape[-sig_dims:]
+        if not nav_shape:
+            # Special case for 2D image data, LT always requires a nav dim
+            nav_shape = (1,)
         return nav_shape, sig_shape
 
     def initialize(self, executor: 'JobExecutor'):
         self._filesize = executor.run_function(self._get_filesize)
-        array_meta = executor.run_function(self._read_metadata, self._path)
+        array_meta = executor.run_function(self._read_metadata,
+                                           self._path,
+                                           use_ds=self._dm_ds_index)
+        sig_dims = array_meta['sig_dims']
         self._array_offset = array_meta['offset']
         self._raw_dtype = array_meta['dtype']
         assert self._raw_dtype is not None and not isinstance(self._raw_dtype, int)
         self._array_c_ordered = self._force_c_order or array_meta['c_order']
         nav_shape, sig_shape = self._modify_shape(array_meta['shape'],
                                                   self._array_c_ordered,
-                                                  sig_dims=self._sig_dims)
+                                                  sig_dims=sig_dims)
 
         # Image count is true number of frames in file (?)
         self._image_count = int(prod(nav_shape))
@@ -260,7 +326,7 @@ class SingleDMDataSet(DMDataSet):
             self._sig_shape = sig_shape
 
         # regardless of file order the Dataset shape property is 'standard'
-        shape = Shape(self._nav_shape + self._sig_shape, sig_dims=self._sig_dims)
+        shape = Shape(self._nav_shape + self._sig_shape, sig_dims=sig_dims)
         self._sync_offset_info = self.get_sync_offset_info()
         self._meta = DataSetMeta(
             shape=shape,
@@ -324,12 +390,14 @@ class SingleDMDataSet(DMDataSet):
         # max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
         # depth = min(max_depth, depth)
         sig_px = max(1, tilesize_px // depth)
-        # we constrain to sig_dims == 2 for DM files
-        _, cols = sig_shape
+        cols = sig_shape[-1]
         if sig_px < cols:
-            out_tileshape = (depth, 1, sig_px)
+            other = (1,) * len(sig_shape[:-1])
+            out_tileshape = (depth,) + other + (sig_px,)
         else:
-            out_tileshape = (depth, max(sig_px // cols, 1), cols)
+            other = sig_shape[1:]
+            other_size = prod(other)
+            out_tileshape = (depth, max(sig_px // other_size, 1)) + other
         return out_tileshape
 
     def need_decode(
