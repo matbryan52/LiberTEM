@@ -407,12 +407,17 @@ class SingleDMDataSet(DMDataSet):
         sig_px = max(1, tilesize_px // depth)
         cols = sig_shape[-1]
         if sig_px < cols:
+            # For given depth we have fewer than one row of elements to use,
+            # must unravel with all-ones before final shape dim
             other = (1,) * len(sig_shape[:-1])
-            out_tileshape = (depth,) + other + (sig_px,)
+            out_tileshape = (depth,) + other + (min(sig_px, cols),)
         else:
+            # For given depth we have more than one row of elements to use
+            # must unravel with complete spans after first shape dim
+            first = sig_shape[0]
             other = sig_shape[1:]
             other_size = prod(other)
-            out_tileshape = (depth, max(sig_px // other_size, 1)) + other
+            out_tileshape = (depth, min(first, max(sig_px // other_size, 1))) + other
         return out_tileshape
 
     def need_decode(
