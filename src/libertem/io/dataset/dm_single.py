@@ -363,6 +363,26 @@ class SingleDMDataSet(DMDataSet):
             )
         ])
 
+    def get_max_io_size(self) -> Optional[int]:
+        """
+        Override this method to implement a custom maximum I/O size (in bytes)
+        """
+        if self._array_c_ordered:
+            return super().get_max_io_size()
+        else:
+            # Generate larger tile shapes / depths,
+            # limits passes through the file
+            return 16 * 2 ** 20
+
+    def get_num_partitions(self) -> int:
+        if self._array_c_ordered:
+            return super().get_num_partitions()
+        else:
+            # 2 GB partitions or == num cores
+            target_part_size = 2048 * 2 ** 20
+            ds_bytesize = self.shape.size * np.dtype(self.meta.raw_dtype).itemsize
+            return max(self._cores, ds_bytesize // target_part_size, 1)
+
     def get_partitions(self):
         partition_cls = DMPartition if self._array_c_ordered else DM4PartitionFortran
         fileset = self._get_fileset()
