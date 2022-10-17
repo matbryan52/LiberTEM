@@ -119,6 +119,13 @@ class DMDataSet(DataSet):
     This class implements the methods necessary to expose a DMDataSet in
     the web GUI, which it does by deferring to SingleDMDataSet. At this
     time multi-file datasets are not supported in the UI.
+
+    NOTE this way of generating the subclasses breaks deeper
+    subclassing, as this __new__ method will always instantiate
+    a SingleDMDataSet or StackedDMDataSet, and not a subclass of
+    either of these. This could potentially be improved by using
+    the .__instance_subclass__() staticmethod to register the
+    subclasses and what they inherit from.
     """
     def __new__(cls, *args, **kwargs):
         # delayed here to avoid circular reference
