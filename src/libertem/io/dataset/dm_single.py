@@ -374,6 +374,14 @@ class SingleDMDataSet(DMDataSet):
             # limits passes through the file
             return 16 * 2 ** 20
 
+    def get_min_sig_size(self) -> int:
+        """
+        Prefer small tile sig size and deep tiles
+        This will let the UDF(s) choose
+        the tileshape without interference
+        """
+        return 1
+
     def get_num_partitions(self) -> int:
         if self._array_c_ordered:
             return super().get_num_partitions()
@@ -410,35 +418,34 @@ class SingleDMDataSet(DMDataSet):
         """
         if self._array_c_ordered:
             return tileshape
+
         sig_shape = self.shape.sig.to_tuple()
-        depth, sig_tile = tileshape[0], tileshape[1:]
-        if sig_tile == sig_shape and depth == 1:
-            # whole frames, nothing to do
+        nav_size = self.shape.nav.size
+
+        itemsize = np.dtype(self.meta.raw_dtype).itemsize
+        tile_depth, tile_sig = tileshape[0], tileshape[1:]
+        tile_sig_size_px = prod(tile_sig)
+        tile_sig_size_bytes = tile_sig_size_px * itemsize
+        # Amount of data we need to traverse to read
+        # all data for this tile_sig_shape
+        tile_on_disk = tile_sig_size_bytes * nav_size
+        if sig_shape == tile_sig:
+            # generating frames or partitions
+            # nothing to do
             return tileshape
-        # Find a tileshape with the same number of total
-        # elements as the proposed tileshape and in a
-        # C-contig form. If the input tileshape is already C
-        # ravellable then this will be a no-op. Written to
-        # allow injecting a different depth value while keeping
-        # the same overall tile size.
-        tilesize_px = prod(tileshape)
-        # max_depth = max(s.shape.nav.size for s, _, _ in self.get_slices())
-        # depth = min(max_depth, depth)
-        sig_px = max(1, tilesize_px // depth)
-        cols = sig_shape[-1]
-        if sig_px < cols:
-            # For given depth we have fewer than one row of elements to use,
-            # must unravel with all-ones before final shape dim
-            other = (1,) * len(sig_shape[:-1])
-            out_tileshape = (depth,) + other + (min(sig_px, cols),)
-        else:
-            # For given depth we have more than one row of elements to use
-            # must unravel with complete spans after first shape dim
-            first = sig_shape[0]
-            other = sig_shape[1:]
-            other_size = prod(other)
-            out_tileshape = (depth, min(first, max(sig_px // other_size, 1))) + other
-        return out_tileshape
+        # Approximates the max number of tiles combined in a chunk
+        # Do everything in float to avoid div/0 errors
+        tiles_in_memmap = FortranReader.MAX_MEMMAP_SIZE / tile_on_disk
+        # For the given buffer size, we limit the depth we can read for the
+        # max combination of tiles that fit into the memmap
+        depth_for_buffer = FortranReader.BUFFER_SIZE / (tile_sig_size_bytes * tiles_in_memmap)
+        # Existing tile depth should already be <= part_nframes so clip to this
+        depth_for_buffer = max(1, min(tile_depth, int(depth_for_buffer)))
+        # A further optimisation would be to half tile_sig and double
+        # depth until we hit the partition length, but this could break
+        # a UDF which requires a specific minimum tile size or has
+        # a maximum depth limit
+        return (depth_for_buffer,) + tile_sig
 
     def need_decode(
         self,
