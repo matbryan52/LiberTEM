@@ -380,6 +380,8 @@ class SingleDMDataSet(DMDataSet):
         This will let the UDF(s) choose
         the tileshape without interference
         """
+        if self._array_c_ordered:
+            return super().get_min_sig_size()
         return 1
 
     def get_num_partitions(self) -> int:
@@ -431,8 +433,11 @@ class SingleDMDataSet(DMDataSet):
         tile_on_disk = tile_sig_size_bytes * nav_size
         if sig_shape == tile_sig:
             # generating frames or partitions
-            # nothing to do
+            # nothing to do, in the partition case depth == num frames
+            # which will create a huge buffer, but this is inevitable
             return tileshape
+        # FIXME Put this onto FortranReader
+        # See if MAX_MEMMAP_SIZE + BUFFER_SIZE can be adapted to worker/RAM
         # Approximates the max number of tiles combined in a chunk
         # Do everything in float to avoid div/0 errors
         tiles_in_memmap = FortranReader.MAX_MEMMAP_SIZE / tile_on_disk
