@@ -1,4 +1,5 @@
 import os
+import mmap
 import operator
 import typing
 from typing import Tuple, Union, Generator, Iterable, List, Set, Dict, Any
@@ -65,7 +66,7 @@ class FortranReader:
         self._chunk_map = self.build_chunk_map(chunk_scheme_indices)
 
         # (index of chunk currently mapped, None | np.memmap)
-        self._memmap = (-1, None)
+        self._memmap = (-1, None, None, None)
 
     @classmethod
     def choose_chunks(cls, tiling_scheme: 'TilingScheme', shape: 'Shape', dtype: 'DTypeLike'):
@@ -171,17 +172,33 @@ class FortranReader:
         # Sort to ensure chunks are read always read in order
         return {tuple(sorted(k)): v for k, v in scheme_map.items()}
 
-    def create_memmap(self, idx: int) -> np.ndarray:
+    def create_memmap(self, idx: int):
         offset, chunkshape = self._chunks[idx]
-        return np.memmap(self._path, mode='r', offset=offset, dtype=self._dtype, shape=chunkshape)
+        chunksize_bytes = prod(chunkshape) * np.dtype(self._dtype).itemsize
+        fp = open(self._path, 'rb')
+        memmap = mmap.mmap(
+            fileno=fp.fileno(),
+            length=chunksize_bytes,
+            offset=offset,
+            access=mmap.ACCESS_READ,
+        )
+        array: np.ndarray = np.frombuffer(memoryview(memmap), dtype=self._dtype).reshape(chunkshape)
+        return (fp, memmap, array)
 
     def get_memmap(self, idx: int):
         if self._memmap[0] != idx:
-            self._memmap = (idx, self.create_memmap(idx))
-        return self._memmap[1]
+            if self._memmap[1] is not None:
+                self.close_memmap()
+            self._memmap = (idx, *self.create_memmap(idx))
+        return self._memmap[-1]
 
     def close_memmap(self):
-        self._memmap = (-1, None)
+        _, handle, memmap, array = self._memmap
+        self._memmap = (-1, None, None, None)
+        # memmap.madvise(mmap.MADV_DONTNEED)
+        del array
+        del memmap
+        handle.close()
 
     def _byte_size(self, shape: Iterable) -> int:
         return np.dtype(self._dtype).itemsize * np.prod(shape, dtype=np.int64)
