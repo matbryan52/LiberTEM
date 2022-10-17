@@ -59,15 +59,26 @@ class SingleDMDataSet(DMDataSet):
         The path to the .dm3/.dm4 file
 
     nav_shape : Tuple[int] or None
-        FIXME
+        Over-ride the nav_shape provided by the file metadata.
+        In new-style DM files, this can be used to adjust the total
+        number of frames, while in old-style files only reshaping
+        while maintaining the same number of frames is possible.
 
     sig_shape: Tuple[int], optional
-        FIXME
+        Over-ride the sig_shape provided by the file metadata.
+        Data are read sequentially in all cases, therefore this
+        is typically only interesting if the total number of
+        sig pixels remains constant.
 
     sync_offset: int, optional, by default 0
         If positive, number of frames to skip from start
         If negative, number of blank frames to insert at start
-        Only allowable != 0 if the file is C-ordered
+
+    io_backend: IOBackend, optional
+        A specific IOBackend implementation to over-ride the
+        platform default. Note, for F/C-ordered (old-style)
+        files cannot be read with standard IOBackends, and therefore
+        this argument will be ignored.
 
     force_c_order: bool, optional, by default False
         Force the data to be interpreted as a C-ordered
