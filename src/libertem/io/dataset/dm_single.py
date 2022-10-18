@@ -425,6 +425,7 @@ class SingleDMDataSet(DMDataSet):
         nav_size = self.shape.nav.size
 
         itemsize = np.dtype(self.meta.raw_dtype).itemsize
+        ds_size_bytes = self.shape.size * itemsize
         tile_depth, tile_sig = tileshape[0], tileshape[1:]
         tile_sig_size_px = prod(tile_sig)
         tile_sig_size_bytes = tile_sig_size_px * itemsize
@@ -438,9 +439,10 @@ class SingleDMDataSet(DMDataSet):
             return tileshape
         # FIXME Put this onto FortranReader
         # See if MAX_MEMMAP_SIZE + BUFFER_SIZE can be adapted to worker/RAM
-        # Approximates the max number of tiles combined in a chunk
+        # Approximates the max number of tiles combined in a chunk, clip to ds_size
+        # to avoid overestimating the number of tiles and therefore making a shallower depth
         # Do everything in float to avoid div/0 errors
-        tiles_in_memmap = FortranReader.MAX_MEMMAP_SIZE / tile_on_disk
+        tiles_in_memmap = min(FortranReader.MAX_MEMMAP_SIZE, ds_size_bytes) / tile_on_disk
         # For the given buffer size, we limit the depth we can read for the
         # max combination of tiles that fit into the memmap
         depth_for_buffer = FortranReader.BUFFER_SIZE / (tile_sig_size_bytes * tiles_in_memmap)
