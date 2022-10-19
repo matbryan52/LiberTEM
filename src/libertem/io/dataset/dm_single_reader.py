@@ -44,7 +44,7 @@ class FortranReader:
     dimensions were individually unrolled using C-order
     """
     MAX_MEMMAP_SIZE = 1024 * 2 ** 20  # 1024 MB
-    BUFFER_SIZE: int = 64 * 2 ** 20
+    BUFFER_SIZE: int = 128 * 2 ** 20
     THRESHOLD_COMBINE: int = 8  # small slices to convert to index arrays
 
     def __init__(self,
