@@ -25,10 +25,26 @@ if typing.TYPE_CHECKING:
 
 class SingleDMDataSet(DMDataSet):
     """
-    Reader for a single DM3/DM4 file
+    Reader for a single DM3/DM4 file. Handles 4D-STEM, 3D-Spectrum Images,
+    and TEM image stacks stored in a single-file format. Where possible
+    the structure will be inferred from the file metadata.
 
-    Where possible the structure will be inferred from the file metadata.
-    In the GUI a 2D-image or 3D-stack/spectrum image will have extra
+    Note
+    ----
+    Single-file DM data can be stored on disk using either normal C-ordering,
+    which is an option in recent versions of GMS, or an alternative F/C-hybrid
+    ordering depending on the imaging mode and dimensionality.
+
+    The DataSet will try to infer the ordering from the file metadata and
+    read accordingly. If the file uses the older hybrid F/C-ordering
+    :code:`(flat_sig, flat_nav)`, then a dedicated I/O backend will be used,
+    and performance may be severely limited compared to 'standard' files.
+
+    A C-ordered interpretation can be forced using the `force_c_order` argument.
+
+    Note
+    ----
+    In the Web-GUI a 2D-image or 3D-stack/spectrum image will have extra
     singleton navigation dimensions prepended to allow them to display.
     DM files containing multiple datasets are supported via the
     `dataset_index` argument.
@@ -37,28 +53,13 @@ class SingleDMDataSet(DMDataSet):
     well-adapted to processing these data and the user should consider
     other tools. Individual spectra or vectors (1D data) are not supported.
 
-    Note
-    ----
-    Single-file 4D DM(4) files are can be stored using normal C-ordering,
-    which is an option in recent versions of GMS. In this case the dataset
-    will try to infer this and use normal LiberTEM I/O for reading the file.
-    If the file uses the older hybrid C/F-ordering (flat_sig, flat_nav)
-    then a dedicated I/O backend will be used instead, and performance
-    will be severely limited in this mode.
-
-    The format is normally stored in the DM tags, but depending on the tag
-    integrity it might not be possible to infer it. The default is hybrid
-    C/F-ordering for STEM data, therefore the lower-performance specialised
-    I/O is used by default. A C-ordered format interpretation can be forced
-    using the `force_c_order` argument.
-
     Parameters
     ----------
 
     path : PathLike
         The path to the .dm3/.dm4 file
 
-    nav_shape : Tuple[int] or None
+    nav_shape : Tuple[int], optional
         Over-ride the nav_shape provided by the file metadata.
         In new-style DM files, this can be used to adjust the total
         number of frames, while in old-style files only reshaping

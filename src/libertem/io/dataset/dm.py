@@ -167,21 +167,8 @@ class StackedDMDataSet(DMDataSet):
 
     Note
     ----
-    Single-file 4D DM files are not yet supported. The use-case would be
-    to read DM4 files from the conversion of K2 STEMx data, but those data sets
-    are actually transposed (nav/sig are swapped).
-
-    That means the data would have to be transposed back into the usual shape,
-    which is slow, or algorithms would have to be adapted to work directly on
-    transposed data. As an example, applying a mask in the conventional layout
-    corresponds to calculating a weighted sum frame along the navigation
-    dimension in the transposed layout.
-
-    Since the transposed layout corresponds to a TEM tilt series, support for
-    transposed 4D STEM data could have more general applications beyond
-    supporting 4D DM4 files. Please contact us if you have a use-case for
-    single-file 4D DM files or other applications that process stacks of TEM
-    files, and we may add support!
+    Single-file 3/4D DM datasets are supported through the
+    :class:`~libertem.io.datasets.dm_single.SingleDMDataSet` class.
 
     Note
     ----
