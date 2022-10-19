@@ -3,7 +3,7 @@ import mmap
 import operator
 import contextlib
 import typing
-from typing import Tuple, Union, Generator, Iterable, List, Set, Dict, Any, namedtuple
+from typing import Tuple, Union, Generator, Iterable, List, Set, Dict, Any, NamedTuple
 from typing_extensions import Literal
 import itertools
 import functools
@@ -18,7 +18,7 @@ if typing.TYPE_CHECKING:
     from numpy.typing import DTypeLike
 
 
-class MemmapContainer(namedtuple):
+class MemmapContainer(NamedTuple):
     idx: int
     memmap: Union[mmap.mmap, None]
     array: Union[np.ndarray, None]
