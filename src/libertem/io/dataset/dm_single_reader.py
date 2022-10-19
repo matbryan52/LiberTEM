@@ -176,14 +176,17 @@ class FortranReader:
         offset, chunkshape = self._chunks[idx]
         chunksize_bytes = prod(chunkshape) * np.dtype(self._dtype).itemsize
         fp = open(self._path, 'rb')
+        # Must memmap with an offset aligned mmap.ALLOCATIONGRANULARITY
+        nearest_alignment = offset % mmap.ALLOCATIONGRANULARITY
         memmap = mmap.mmap(
             fileno=fp.fileno(),
-            length=chunksize_bytes,
-            offset=offset,
+            length=chunksize_bytes + nearest_alignment,
+            offset=offset - nearest_alignment,
             access=mmap.ACCESS_READ,
         )
-        array: np.ndarray = np.frombuffer(memoryview(memmap), dtype=self._dtype).reshape(chunkshape)
-        return (fp, memmap, array)
+        array: np.ndarray = np.frombuffer(memoryview(memmap)[nearest_alignment:],
+                                          dtype=self._dtype)
+        return (fp, memmap, array.reshape(chunkshape))
 
     def get_memmap(self, idx: int):
         if self._memmap[0] != idx:
@@ -196,6 +199,7 @@ class FortranReader:
         _, handle, memmap, array = self._memmap
         self._memmap = (-1, None, None, None)
         # memmap.madvise(mmap.MADV_DONTNEED)
+        # memmap.close()
         del array
         del memmap
         handle.close()
