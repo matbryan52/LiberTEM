@@ -194,7 +194,8 @@ class H5DataSet(DataSet):
     sig_shape: tuple of int, optional
         A n-tuple that specifies the shape of the signal / frame grid.
         This parameter is currently unsupported and will raise an error
-        if provided. By default the sig_shape is inferred from the HDF5 dataset
+        if provided (unless the provided tuple matches the sig_shape in the file).
+        By default the sig_shape is inferred from the HDF5 dataset
         via the :code:`sig_dims` parameter.
 
     sig_dims: int
@@ -258,8 +259,7 @@ class H5DataSet(DataSet):
         self._dtype = None
         self._shape = None
         self._nav_shape = nav_shape
-        if sig_shape is not None:
-            raise NotImplementedError('HDF5 sig reshaping not yet available')
+        self._sig_shape = sig_shape
         self._sync_offset = 0
         self._chunks = None
         self._compression = None
@@ -290,6 +290,8 @@ class H5DataSet(DataSet):
                     'Only support reshaping between same number of frames, '
                     f'got {self._nav_shape} for dataset with shape {ds_shape.nav}'
                 )
+            if self._sig_shape is not None and self._sig_shape != ds_shape.sig:
+                raise NotImplementedError('HDF5 sig reshaping not yet available')
             nav_shape = ds_shape.nav.to_tuple() if self._nav_shape is None else self._nav_shape
             self._shape = nav_shape + ds_shape.sig
             self._meta = DataSetMeta(

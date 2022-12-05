@@ -763,7 +763,7 @@ def test_nav_reshape(lt_ctx, tmpdir_factory, file_nav_shape, nav_chunks, nav_sha
     os.unlink(filename)
 
 
-def test_nav_reshape_incompatible(lt_ctx, tmpdir_factory):
+def test_reshape_incompatible(lt_ctx, tmpdir_factory):
     file_shape = (8, 16, 16)
     nav_shape = (3, 3)
     sig_dims = 2
@@ -780,5 +780,13 @@ def test_nav_reshape_incompatible(lt_ctx, tmpdir_factory):
             "hdf5",
             path=filename,
             nav_shape=nav_shape,
+            sig_dims=sig_dims,
+        )
+
+    with pytest.raises(NotImplementedError):
+        lt_ctx.load(
+            "hdf5",
+            path=filename,
+            sig_shape=(1, 1),
             sig_dims=sig_dims,
         )
