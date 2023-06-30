@@ -16,14 +16,19 @@ class ApplyMasksEngine:
             import torch
         except ImportError:
             torch = None
-        m = self.meta
-        use_torch
-        if (torch is None or m.input_dtype.kind != 'f' or m.input_dtype != self.masks.dtype
-                or self.meta.device_class != 'cpu' or self.masks.use_sparse
-                or self.meta.array_backend != NUMPY):
-            use_torch = False
-        backend = self.meta.array_backend
-        if use_torch:
+
+        torch_incompatible = (
+            torch is None
+            or self.meta.input_dtype.kind != 'f'
+            or self.meta.input_dtype != self.masks.dtype
+            or self.meta.device_class != 'cpu'
+            or self.meta.array_backend != NUMPY
+            or self.masks.use_sparse
+        )
+
+        self.use_torch = use_torch and (not torch_incompatible)
+
+        if self.use_torch:
 
             def process_flat(flat_tile):
                 import torch
@@ -39,9 +44,11 @@ class ApplyMasksEngine:
                 return result
 
         # Required due to https://github.com/scipy/scipy/issues/13211
-        elif (backend == NUMPY
-              and self.masks.use_sparse
-              and 'scipy.sparse' in self.masks.use_sparse):
+        elif (
+            self.meta.array_backend == NUMPY
+            and self.masks.use_sparse
+            and 'scipy.sparse' in self.masks.use_sparse
+        ):
 
             def process_flat(flat_tile):
                 masks = self.masks.get_for_sig_slice(
@@ -51,7 +58,7 @@ class ApplyMasksEngine:
                 return result
 
         elif (
-            backend in (SCIPY_COO, SCIPY_CSR, SCIPY_CSC)
+            self.meta.array_backend in (SCIPY_COO, SCIPY_CSR, SCIPY_CSC)
             and self.masks.use_sparse
             and 'sparse.pydata' in self.masks.use_sparse
         ):
@@ -74,7 +81,7 @@ class ApplyMasksEngine:
 
                 result = flat_tile @ masks
                 return result
-        self.use_torch = use_torch
+
         self.process_flat = process_flat
 
     def process_tile(self, tile):
