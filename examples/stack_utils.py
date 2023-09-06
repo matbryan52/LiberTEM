@@ -19,6 +19,18 @@ class DoesFFTStack(UDF):
         return {}
     
     def process_tile(self, tile):
+        try:
+            if self._processed_tiles < 0:
+                raise RuntimeError('Multiple tiles with less than stack_size')
+            self._processed_tiles += 1
+            assert tile.shape[0] == self.params.get('stack_size')
+        except AttributeError:
+            self._processed_tiles = 1
+            assert tile.shape[0] == self.params.get('stack_size')
+        except AssertionError:
+            # Should be last tile, will not be called again
+            assert self._processed_tiles > 0
+            self._processed_tiles = -1
         stack_fft = self.xp.fft.fft2(tile)
         try:
             stack_fft.get()
