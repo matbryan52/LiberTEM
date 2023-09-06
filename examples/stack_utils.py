@@ -5,6 +5,9 @@ import libertem
 import pyfftw
 
 class NeedsFrame(UDF):
+    def get_backends(self):
+        return (UDF.BACKEND_NUMPY, UDF.BACKEND_CUPY)
+    
     def get_result_buffers(self):
         return {}
     
