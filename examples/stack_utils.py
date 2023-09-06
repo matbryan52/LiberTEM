@@ -2,6 +2,7 @@ from libertem.udf.base import UDF
 from libertem.io.dataset.raw import RawFileDataSet
 import libertem
 
+import pyfftw
 
 class NeedsFrame(UDF):
     def get_result_buffers(self):
@@ -31,7 +32,10 @@ class DoesFFTStack(UDF):
             # Should be last tile, will not be called again
             assert self._processed_tiles > 0
             self._processed_tiles = -1
-        stack_fft = self.xp.fft.fft2(tile)
+        if self.params.get('use_pyfftw', False):
+            stack_fft = pyfftw.interfaces.scipy_fftpack.fft2(tile)
+        else:
+            stack_fft = self.xp.fft.fft2(tile)
         try:
             stack_fft.get()
         except AttributeError:
@@ -46,7 +50,10 @@ class DoesFFTFrame(UDF):
         return {}
     
     def process_frame(self, frame):
-        stack_fft = self.xp.fft.fft2(frame)
+        if self.params.get('use_pyfftw', False):
+            stack_fft = pyfftw.interfaces.scipy_fftpack.fft2(frame)
+        else:
+            stack_fft = self.xp.fft.fft2(frame)
         try:
             stack_fft.get()
         except AttributeError:
