@@ -29,6 +29,7 @@ filetypes = {
     "npy": "libertem.io.dataset.npy.NPYDataSet",
     "dask": "libertem.io.dataset.dask.DaskDataSet",
     "memory": "libertem.io.dataset.memory.MemoryDataSet",
+    "zarr": "libertem.io.dataset.zarr.ZarrDataSet",
 }
 
 

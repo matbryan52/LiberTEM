@@ -4,6 +4,7 @@ import zarr
 import numpy as np
 
 from libertem.common import Slice, Shape
+from libertem.common.math import count_nonzero
 from libertem.common.buffers import zeros_aligned
 from libertem.corrections import CorrectionSet
 from .base import (
@@ -56,6 +57,10 @@ class ZarrDataSet(DataSet):
     @classmethod
     def get_supported_extensions(cls):
         return set()
+
+    @classmethod
+    def get_supported_io_backends(cls):
+        return []
 
     @classmethod
     def _do_detect(cls, path):
@@ -137,7 +142,7 @@ class ZarrPartition(Partition):
         self._corrections = None
         self._chunks = chunks
         self._path = path
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, decoder=None, **kwargs)
 
     def _have_compatible_chunking(self):
         chunks = self._chunks
@@ -272,20 +277,20 @@ class ZarrPartition(Partition):
         sig_origin = tuple([0] * self.meta.shape.sig.dims)
         frames_read = 0
         start_at_frame = self.slice.origin[0]
-        frame_offset = np.count_nonzero(flat_roi[:start_at_frame])
+        frame_offset = count_nonzero(flat_roi[:start_at_frame])
 
         indices = _roi_to_nd_indices(roi, self._slice_nd)
 
         tile_data = np.zeros(result_shape, dtype=dest_dtype)
 
-        dataset = zarr.open(self._file)
+        dataset = zarr.open(self._path)
         tile_data_raw = np.zeros(result_shape, dtype=dataset.dtype)
         for idx in indices:
             tile_slice = Slice(
                 origin=(frames_read + frame_offset,) + sig_origin,
                 shape=result_shape,
             )
-            dataset.get_basic_selection(idx, out=tile_data_raw)
+            dataset.get_basic_selection(idx, out=tile_data_raw[0, ...])
             tile_data[:] = tile_data_raw  # extra copy for dtype/endianess conversion
             self._preprocess(tile_data, tile_slice)
             yield DataTile(
@@ -344,7 +349,7 @@ class ZarrPartition(Partition):
     def get_max_io_size(self):
         return 2 * np.prod(self._chunks) * np.dtype(self.meta.raw_dtype).itemsize
 
-    def get_tiles(self, tiling_scheme, dest_dtype="float32", roi=None):
+    def get_tiles(self, tiling_scheme, dest_dtype="float32", roi=None, array_backend=None):
         import numcodecs
         numcodecs.blosc.use_threads = False
         if roi is not None:
