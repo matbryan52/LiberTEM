@@ -13,6 +13,8 @@ from libertem.io.dataset.base import TilingScheme
 from libertem.common import Shape
 from libertem.analysis.sum import SumAnalysis
 
+from utils import _mk_random, PixelsumUDF
+
 
 def get_or_create_zarr(tmpdir_factory, filename, **kwargs):
     datadir = tmpdir_factory.mktemp('data')
@@ -53,7 +55,7 @@ def random_zarr_large_sig(tmpdir_factory):
 
 
 @pytest.fixture(scope='module')
-def random_zarr(tmpdir_factory):
+def random_zarr_4d(tmpdir_factory):
     yield from get_or_create_zarr(tmpdir_factory, "zarr-test-random.zarr",
                                   data=np.random.randn(5, 5, 16, 16))
 
@@ -123,10 +125,10 @@ def test_read_2(lt_ctx, zarr_4d):
             print(t.tile_slice)
 
 
-def test_read_3(lt_ctx, random_zarr):
+def test_read_3(lt_ctx, random_zarr_4d):
     # try with smaller partitions:
     ds = ZarrDataSet(
-        path=os.path.join(random_zarr.store.path, "data"),
+        path=os.path.join(random_zarr_4d.store.path, "data"),
     )
     ds = ds.initialize(lt_ctx.executor)
     tileshape = Shape(
@@ -142,9 +144,9 @@ def test_read_3(lt_ctx, random_zarr):
             print(t.tile_slice)
 
 
-def test_pick(random_zarr, lt_ctx):
+def test_pick(random_zarr_4d, lt_ctx):
     ds = ZarrDataSet(
-        path=os.path.join(random_zarr.store.path, "data"),
+        path=os.path.join(random_zarr_4d.store.path, "data"),
     )
     ds = ds.initialize(lt_ctx.executor)
     assert len(ds.shape) == 4
@@ -152,12 +154,12 @@ def test_pick(random_zarr, lt_ctx):
     pick = lt_ctx.create_pick_analysis(dataset=ds, x=2, y=3)
     res = lt_ctx.run(pick)
     pick_frame = res.intensity.raw_data
-    assert_allclose(random_zarr["data"][3, 2, ...], pick_frame)
+    assert_allclose(random_zarr_4d["data"][3, 2, ...], pick_frame)
 
 
-def test_roi_2(random_zarr, lt_ctx):
+def test_roi_2(random_zarr_4d, lt_ctx):
     ds = ZarrDataSet(
-        path=os.path.join(random_zarr.store.path, "data"),
+        path=os.path.join(random_zarr_4d.store.path, "data"),
     )
     ds = ds.initialize(lt_ctx.executor)
 
@@ -189,7 +191,7 @@ def test_roi_2(random_zarr, lt_ctx):
     # Zarr does not support indexing with a mask
     # unless it has the same shape as the dataset,
     # so we need numpy to mask-slice only the nav dims
-    data = np.asarray(random_zarr["data"])
+    data = np.asarray(random_zarr_4d["data"])
 
     # applying the mask flattens the first two dimensions, so we
     # only sum over axis 0 here:
@@ -202,3 +204,26 @@ def test_roi_2(random_zarr, lt_ctx):
     assert not np.allclose(results.intensity.raw_data, data.sum(axis=(0, 1)))
     # ... but rather like `expected`:
     assert np.allclose(results.intensity.raw_data, expected)
+
+
+@pytest.mark.parametrize('chunks', [
+    (1, 3, 16, 16),
+    (1, 6, 16, 16),
+    (1, 4, 16, 16),
+    (1, 16, 16, 16),
+])
+def test_chunked(lt_ctx, tmpdir_factory, chunks):
+    datadir = tmpdir_factory.mktemp('data')
+    filename = os.path.join(datadir, 'zarr-test-chunked.zarr')
+    data = _mk_random((16, 16, 16, 16), dtype=np.float32)
+
+    root = zarr.hierarchy.open_group(filename, "w")
+    root.array("data", data=data, chunks=chunks)
+
+    ds = lt_ctx.load("zarr", path=os.path.join(filename, "data"))
+    udf = PixelsumUDF()
+    res = lt_ctx.run_udf(udf=udf, dataset=ds)['pixelsum']
+    assert np.allclose(
+        res,
+        np.sum(data, axis=(2, 3))
+    )
