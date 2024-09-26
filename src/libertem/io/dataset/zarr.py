@@ -2,13 +2,15 @@ import logging
 
 import zarr
 import numpy as np
+from sparseconverter import CUDA, NUMPY
 
 from libertem.common import Slice, Shape
 from libertem.common.math import count_nonzero
 from libertem.common.buffers import zeros_aligned
 from libertem.corrections import CorrectionSet
 from .base import (
-    DataSet, Partition, DataTile, DataSetException, DataSetMeta, _roi_to_nd_indices,
+    DataSet, Partition, DataTile, DataSetException, DataSetMeta,
+    _roi_to_nd_indices, TilingScheme
 )
 
 from .hdf5 import (
@@ -49,6 +51,9 @@ class ZarrDataSet(DataSet):
 
     def initialize(self, executor):
         return executor.run_function(self._do_initialize)
+
+    def get_array(self):
+        return zarr.convenience.open(self._path, mode='r')
 
     @classmethod
     def get_msg_converter(cls):
@@ -137,7 +142,7 @@ class ZarrDataSet(DataSet):
 
 
 class ZarrPartition(Partition):
-    def __init__(self, path, slice_nd, chunks, *args, **kwargs):
+    def __init__(self, path: str, slice_nd: Slice, chunks, *args, **kwargs):
         self._slice_nd = slice_nd
         self._corrections = None
         self._chunks = chunks
@@ -365,6 +370,11 @@ class ZarrPartition(Partition):
     def get_tiles(self, tiling_scheme, dest_dtype="float32", roi=None, array_backend=None):
         import numcodecs
         numcodecs.blosc.use_threads = False
+
+        if array_backend is None:
+            array_backend = self.meta.array_backends[0]
+        assert array_backend in (NUMPY, CUDA)
+        tiling_scheme = tiling_scheme.adjust_for_partition(self)
         if roi is not None:
             yield from self._get_tiles_with_roi(roi, dest_dtype, tiling_scheme)
         else:
@@ -398,25 +408,28 @@ class ZarrPartition(Partition):
         from HDF5, we can only use 3*32 frames of the total 32*32 frames,
         a whopping ~10x read amplification.
         '''
-        import numcodecs
-        numcodecs.blosc.use_threads = False
+        tileshape = self.shape
+        # if self._chunks is not None:
+        #     tileshape = self._chunks
+
+        tiling_scheme = TilingScheme.make_for_shape(
+            tileshape=Shape(tileshape, sig_dims=self.slice.shape.sig.dims).flatten_nav(),
+            dataset_shape=self.meta.shape,
+        )
 
         data = zeros_aligned(self.slice.adjust_for_roi(roi).shape, dtype=dest_dtype)
 
-        za = zarr.open(self._path, mode='r')
-        if roi is not None:
-            roi = roi.reshape(self.meta.shape.nav)
-            roi = roi[self._slice_nd.get(nav_only=True)]
-            za.get_mask_selection(roi, out=data)
-        else:
-            za.get_basic_selection(self._slice_nd, out=data)
-
+        for tile in self.get_tiles(
+            tiling_scheme=tiling_scheme,
+            dest_dtype=dest_dtype,
+            roi=roi,
+        ):
+            rel_slice = tile.tile_slice.shift(self.slice)
+            data[rel_slice.get()] = tile.data
         tile_slice = Slice(
             origin=(self.slice.origin[0], 0, 0),
             shape=Shape(data.shape, sig_dims=2),
         )
-        self._preprocess(data, tile_slice.flatten_nav())
-
         return DataTile(
             data,
             tile_slice=tile_slice,

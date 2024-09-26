@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import numpy as np
 from numpy.testing import assert_allclose
@@ -13,6 +14,8 @@ from libertem.io.dataset.base import TilingScheme
 from libertem.common import Shape
 from libertem.analysis.sum import SumAnalysis
 from libertem.udf.sumsigudf import SumSigUDF
+from libertem.udf.auto import AutoUDF
+from libertem.udf import UDF
 from libertem.io.dataset.base import Negotiator
 
 from utils import _mk_random, PixelsumUDF
@@ -89,6 +92,20 @@ def zarr_same_data_5d(tmpdir_factory, zarr_4d_data):
 def zarr_same_data_1d_sig(tmpdir_factory, zarr_4d_data):
     data = zarr_4d_data.reshape((2, 10, 676))
     yield from get_or_create_zarr(tmpdir_factory, "zarr-test-reshape-1d-sig.zarr", data=data)
+
+
+@pytest.fixture(scope='module')
+def shared_random_data():
+    return _mk_random(size=(16, 16, 256, 256), dtype='float32')
+
+
+@pytest.fixture
+def zarr_ds_1(zarr_4d, inline_executor):
+    ds = ZarrDataSet(
+        path=os.path.join(zarr_4d.store.path, "data")
+    )
+    ds = ds.initialize(inline_executor)
+    return ds
 
 
 def test_read_1(lt_ctx, zarr_4d):
@@ -231,6 +248,58 @@ def test_chunked(lt_ctx, tmpdir_factory, chunks):
     )
 
 
+@pytest.mark.parametrize('udf', [
+    SumSigUDF(),
+    AutoUDF(f=lambda frame: frame.sum()),
+])
+@pytest.mark.parametrize('chunks', [
+    (3, 3, 32, 32),
+    (3, 6, 32, 32),
+    (3, 4, 32, 32),
+    (1, 4, 32, 32),
+    (1, 16, 32, 32),
+
+    (3, 3, 256, 256),
+    (3, 6, 256, 256),
+    (3, 4, 256, 256),
+    (1, 4, 256, 256),
+    (1, 16, 256, 256),
+
+    (3, 3, 128, 256),
+    (3, 6, 128, 256),
+    (3, 4, 128, 256),
+    (1, 4, 128, 256),
+    (1, 16, 128, 256),
+
+    (3, 3, 32, 128),
+    (3, 6, 32, 128),
+    (3, 4, 32, 128),
+    (1, 4, 32, 128),
+    (1, 16, 32, 128),
+])
+def test_chunked_weird(lt_ctx, tmpdir_factory, chunks, udf, shared_random_data):
+    datadir = tmpdir_factory.mktemp('data')
+    filename = os.path.join(datadir, 'weirdly-chunked-256-256.zarr')
+    data = shared_random_data
+
+    root = zarr.hierarchy.open_group(filename, "w")
+    root.array("data", data=data, chunks=chunks)
+    ds = lt_ctx.load("zarr", path=os.path.join(filename, "data"))
+
+    base_shape = ds.get_base_shape(roi=None)
+    print(base_shape)
+
+    res = lt_ctx.run_udf(dataset=ds, udf=udf)
+    assert len(res) == 1
+    res = next(iter(res.values()))
+    assert_allclose(
+        res,
+        np.sum(data, axis=(2, 3))
+    )
+
+    shutil.rmtree(filename)
+
+
 @pytest.mark.parametrize('in_dtype', [
     np.float32,
     np.float64,
@@ -271,3 +340,111 @@ def test_zarr_result_dtype(lt_ctx, tmpdir_factory, in_dtype, read_dtype, use_roi
     )
     tile = next(p.get_tiles(tiling_scheme=tiling_scheme, roi=roi, dest_dtype=read_dtype))
     assert tile.dtype == np.dtype(read_dtype)
+
+
+class UDFWithLargeDepth(UDF):
+    def process_tile(self, tile):
+        pass
+
+    def get_tiling_preferences(self):
+        return {
+            "depth": 128,
+            "total_size": UDF.TILE_SIZE_BEST_FIT,
+        }
+
+
+def test_zarr_tileshape_negotation(lt_ctx, tmpdir_factory):
+    # try to hit the third case in _get_subslices:
+    datadir = tmpdir_factory.mktemp('data')
+    filename = os.path.join(datadir, 'tileshape-neg-test.zarr')
+    data = _mk_random((4, 100, 256, 256), dtype=np.uint16)
+
+    root = zarr.hierarchy.open_group(filename, "w")
+    root.array("data", data=data, chunks=(2, 32, 32, 32))
+    ds = lt_ctx.load("zarr", path=os.path.join(filename, "data"))
+
+    udfs = [UDFWithLargeDepth()]
+    p = next(ds.get_partitions())
+    neg = Negotiator()
+    tiling_scheme = neg.get_scheme(
+        udfs=udfs,
+        dataset=ds,
+        approx_partition_shape=p.shape,
+        read_dtype=np.float32,
+        roi=None,
+        corrections=None,
+    )
+    assert len(tiling_scheme) > 1
+    next(p.get_tiles(tiling_scheme=tiling_scheme, roi=None, dest_dtype=np.float32))
+
+
+def test_scheme_too_large(zarr_ds_1):
+    partitions = zarr_ds_1.get_partitions()
+    p = next(partitions)
+    depth = p.shape[0]
+
+    # we make a tileshape that is too large for the partition here:
+    tileshape = Shape(
+        (depth + 1,) + tuple(zarr_ds_1.shape.sig),
+        sig_dims=zarr_ds_1.shape.sig.dims
+    )
+    tiling_scheme = TilingScheme.make_for_shape(
+        tileshape=tileshape,
+        dataset_shape=zarr_ds_1.shape,
+    )
+
+    # tile shape is clamped to partition shape.
+    # in case of hdf5, it is even smaller than the
+    # partition, as the depth from the negotiation
+    # is overridden:
+    tiles = p.get_tiles(tiling_scheme=tiling_scheme)
+    t = next(tiles)
+    assert t.tile_slice.shape[0] <= zarr_ds_1.shape[0]
+
+
+def test_zarr_macrotile(lt_ctx, tmpdir_factory):
+    datadir = tmpdir_factory.mktemp('data')
+    filename = os.path.join(datadir, 'macrotile-1.zarr')
+    data = _mk_random((128, 128, 4, 4), dtype=np.float32)
+
+    root = zarr.hierarchy.open_group(filename, "w")
+    root.array("data", data=data)
+    ds = lt_ctx.load("zarr", path=os.path.join(filename, "data"))
+
+    ds.set_num_cores(4)
+
+    partitions = ds.get_partitions()
+    p0 = next(partitions)
+    m0 = p0.get_macrotile()
+    assert m0.tile_slice.origin == (0, 0, 0)
+    assert m0.tile_slice.shape == p0.shape
+
+    p1 = next(partitions)
+    m1 = p1.get_macrotile()
+    assert m1.tile_slice.origin == (p0.shape[0], 0, 0)
+    assert m1.tile_slice.shape == p1.shape
+
+
+def test_zarr_macrotile_roi(lt_ctx, zarr_ds_1):
+    roi = np.random.choice(size=zarr_ds_1.shape.flatten_nav().nav, a=[True, False])
+    data = np.asarray(zarr_ds_1.get_array())
+    expected = data.reshape(zarr_ds_1.shape.flatten_nav())[roi]
+    partitions = zarr_ds_1.get_partitions()
+    p0 = next(partitions)
+    m0 = p0.get_macrotile(roi=roi)
+    assert_allclose(
+        m0.data,
+        expected
+    )
+
+
+def test_zarr_macrotile_empty_roi(lt_ctx, zarr_ds_1):
+    roi = np.zeros(zarr_ds_1.shape.flatten_nav().nav, dtype=bool)
+    partitions = zarr_ds_1.get_partitions()
+    p0 = next(partitions)
+    m0 = p0.get_macrotile(roi=roi)
+    assert m0.shape == (0, 16, 16)
+    assert_allclose(
+        m0.data,
+        0,
+    )
