@@ -246,7 +246,15 @@ class ZarrPartition(Partition):
         dataset = zarr.open(self._path, mode='r')
         # because the dtype conversion done by HDF5 itself can be quite slow,
         # we need to use a buffer for reading in hdf5 native dtype:
-        data_flat = zeros_aligned(tiling_scheme.shape, dtype=dataset.dtype).reshape((-1,))
+        data_flat = zeros_aligned(
+            tiling_scheme.shape,
+            dtype=dataset.dtype
+        ).reshape((-1,))
+
+        data_flat_res = np.zeros(
+            tiling_scheme.shape,
+            dtype=dest_dtype
+        ).reshape((-1,))
 
         subslices = self._get_subslices(
             tiling_scheme=tiling_scheme,
@@ -257,7 +265,12 @@ class ZarrPartition(Partition):
             buf_size = tile_slice.shape.size
             buf = data_flat[:buf_size].reshape(tile_slice.shape)
             dataset.get_basic_selection(tile_slice.get(), out=buf)
-            tile_data = buf.reshape(tile_slice_flat.shape)
+
+            raw_shape = tile_slice_flat.shape
+            buf_res = data_flat_res[:buf_size].reshape(tile_slice.shape)
+            buf_res[:] = buf
+            tile_data = buf_res.reshape(raw_shape)
+
             self._preprocess(tile_data, tile_slice_flat)
             yield DataTile(
                 tile_data,

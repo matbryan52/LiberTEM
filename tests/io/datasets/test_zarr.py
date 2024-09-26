@@ -12,6 +12,8 @@ from libertem.io.dataset.zarr import ZarrDataSet
 from libertem.io.dataset.base import TilingScheme
 from libertem.common import Shape
 from libertem.analysis.sum import SumAnalysis
+from libertem.udf.sumsigudf import SumSigUDF
+from libertem.io.dataset.base import Negotiator
 
 from utils import _mk_random, PixelsumUDF
 
@@ -227,3 +229,45 @@ def test_chunked(lt_ctx, tmpdir_factory, chunks):
         res,
         np.sum(data, axis=(2, 3))
     )
+
+
+@pytest.mark.parametrize('in_dtype', [
+    np.float32,
+    np.float64,
+    np.uint16,
+])
+@pytest.mark.parametrize('read_dtype', [
+    np.float32,
+    np.float64,
+    np.uint16,
+])
+@pytest.mark.parametrize('use_roi', [
+    True, False
+])
+def test_zarr_result_dtype(lt_ctx, tmpdir_factory, in_dtype, read_dtype, use_roi):
+    datadir = tmpdir_factory.mktemp('data')
+    filename = os.path.join(datadir, 'result-dtype-checks.zarr')
+    data = _mk_random((2, 2, 4, 4), dtype=in_dtype)
+
+    root = zarr.hierarchy.open_group(filename, "w")
+    root.array("data", data=data)
+    ds = lt_ctx.load("zarr", path=os.path.join(filename, "data"))
+
+    if use_roi:
+        roi = np.zeros(ds.shape.nav, dtype=bool).reshape((-1,))
+        roi[0] = 1
+    else:
+        roi = None
+    udfs = [SumSigUDF()]  # need to have at least one UDF
+    p = next(ds.get_partitions())
+    neg = Negotiator()
+    tiling_scheme = neg.get_scheme(
+        udfs=udfs,
+        dataset=ds,
+        approx_partition_shape=p.shape,
+        read_dtype=read_dtype,
+        roi=roi,
+        corrections=None,
+    )
+    tile = next(p.get_tiles(tiling_scheme=tiling_scheme, roi=roi, dest_dtype=read_dtype))
+    assert tile.dtype == np.dtype(read_dtype)
