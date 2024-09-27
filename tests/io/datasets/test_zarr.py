@@ -18,7 +18,7 @@ from libertem.udf.auto import AutoUDF
 from libertem.udf import UDF
 from libertem.io.dataset.base import Negotiator
 
-from utils import _mk_random, PixelsumUDF
+from utils import _mk_random, PixelsumUDF, _naive_mask_apply
 
 
 def get_or_create_zarr(tmpdir_factory, filename, **kwargs):
@@ -103,6 +103,24 @@ def shared_random_data():
 def zarr_ds_1(zarr_4d, inline_executor):
     ds = ZarrDataSet(
         path=os.path.join(zarr_4d.store.path, "data")
+    )
+    ds = ds.initialize(inline_executor)
+    return ds
+
+
+@pytest.fixture
+def zarr_ds_3d(zarr_3d, inline_executor):
+    ds = ZarrDataSet(
+        path=os.path.join(zarr_3d.store.path, "data")
+    )
+    ds = ds.initialize(inline_executor)
+    return ds
+
+
+@pytest.fixture
+def zarr_ds_5d(zarr_5d, inline_executor):
+    ds = ZarrDataSet(
+        path=os.path.join(zarr_5d.store.path, "data")
     )
     ds = ds.initialize(inline_executor)
     return ds
@@ -427,7 +445,7 @@ def test_zarr_macrotile(lt_ctx, tmpdir_factory):
 
 def test_zarr_macrotile_roi(lt_ctx, zarr_ds_1):
     roi = np.random.choice(size=zarr_ds_1.shape.flatten_nav().nav, a=[True, False])
-    data = np.asarray(zarr_ds_1.get_array())
+    data = zarr_ds_1.get_array(load=True)
     expected = data.reshape(zarr_ds_1.shape.flatten_nav())[roi]
     partitions = zarr_ds_1.get_partitions()
     p0 = next(partitions)
@@ -447,4 +465,51 @@ def test_zarr_macrotile_empty_roi(lt_ctx, zarr_ds_1):
     assert_allclose(
         m0.data,
         0,
+    )
+
+
+def test_zarr_apply_masks_1(lt_ctx, zarr_ds_1):
+    mask = _mk_random(size=(16, 16))
+    data = zarr_ds_1.get_array(load=True)
+    expected = _naive_mask_apply([mask], data)
+    analysis = lt_ctx.create_mask_analysis(
+        dataset=zarr_ds_1, factories=[lambda: mask]
+    )
+    results = lt_ctx.run(analysis)
+
+    assert np.allclose(
+        results.mask_0.raw_data,
+        expected
+    )
+
+
+def test_hdf5_3d_apply_masks(lt_ctx, zarr_ds_3d):
+    mask = _mk_random(size=(16, 16))
+    data = zarr_ds_3d.get_array(load=True)
+    expected = _naive_mask_apply([mask], data.reshape((1, 17, 16, 16)))
+    analysis = lt_ctx.create_mask_analysis(
+        dataset=zarr_ds_3d, factories=[lambda: mask]
+    )
+    results = lt_ctx.run(analysis)
+
+    assert np.allclose(
+        results.mask_0.raw_data,
+        expected
+    )
+
+
+def test_hdf5_5d_apply_masks(lt_ctx, zarr_ds_5d):
+    mask = _mk_random(size=(16, 16))
+    data = zarr_ds_5d.get_array(load=True)
+    expected = _naive_mask_apply([mask], data.reshape((1, 135, 16, 16))).reshape((3, 5, 9))
+    analysis = lt_ctx.create_mask_analysis(
+        dataset=zarr_ds_5d, factories=[lambda: mask]
+    )
+    results = lt_ctx.run(analysis)
+
+    print(results.mask_0.raw_data.shape, expected.shape)
+
+    assert np.allclose(
+        results.mask_0.raw_data,
+        expected
     )

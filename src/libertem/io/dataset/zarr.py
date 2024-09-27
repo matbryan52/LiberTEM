@@ -52,8 +52,11 @@ class ZarrDataSet(DataSet):
     def initialize(self, executor):
         return executor.run_function(self._do_initialize)
 
-    def get_array(self):
-        return zarr.convenience.open(self._path, mode='r')
+    def get_array(self, load: bool = False):
+        za = zarr.convenience.open(self._path, mode='r')
+        if load:
+            return np.asarray(za)
+        return za
 
     @classmethod
     def get_msg_converter(cls):
