@@ -1,5 +1,6 @@
 import os
 import shutil
+import json
 
 import numpy as np
 from numpy.testing import assert_allclose
@@ -509,3 +510,11 @@ def test_zarr_5d_apply_masks(lt_ctx, zarr_ds_5d):
         results.mask_0.raw_data,
         expected
     )
+
+
+def test_cache_key_json_serializable(zarr_4d, lt_ctx):
+    ds = ZarrDataSet(
+        path=os.path.join(zarr_4d.store.path, "data")
+    )
+    ds = ds.initialize(lt_ctx.executor)
+    json.dumps(ds.get_cache_key())
