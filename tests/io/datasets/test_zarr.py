@@ -411,10 +411,6 @@ def test_scheme_too_large(zarr_ds_1):
         dataset_shape=zarr_ds_1.shape,
     )
 
-    # tile shape is clamped to partition shape.
-    # in case of hdf5, it is even smaller than the
-    # partition, as the depth from the negotiation
-    # is overridden:
     tiles = p.get_tiles(tiling_scheme=tiling_scheme)
     t = next(tiles)
     assert t.tile_slice.shape[0] <= zarr_ds_1.shape[0]
@@ -483,7 +479,7 @@ def test_zarr_apply_masks_1(lt_ctx, zarr_ds_1):
     )
 
 
-def test_hdf5_3d_apply_masks(lt_ctx, zarr_ds_3d):
+def test_zarr_3d_apply_masks(lt_ctx, zarr_ds_3d):
     mask = _mk_random(size=(16, 16))
     data = zarr_ds_3d.get_array(load=True)
     expected = _naive_mask_apply([mask], data.reshape((1, 17, 16, 16)))
@@ -498,7 +494,7 @@ def test_hdf5_3d_apply_masks(lt_ctx, zarr_ds_3d):
     )
 
 
-def test_hdf5_5d_apply_masks(lt_ctx, zarr_ds_5d):
+def test_zarr_5d_apply_masks(lt_ctx, zarr_ds_5d):
     mask = _mk_random(size=(16, 16))
     data = zarr_ds_5d.get_array(load=True)
     expected = _naive_mask_apply([mask], data.reshape((1, 135, 16, 16))).reshape((3, 5, 9))
