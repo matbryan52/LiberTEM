@@ -83,6 +83,8 @@ dependencies = [
     "tornado>=5",
     "tqdm",
     "typing-extensions",
+    "zarr",
+    "numcodecs"
 ]
 
 [project.optional-dependencies]
